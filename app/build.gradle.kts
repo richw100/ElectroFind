@@ -76,6 +76,9 @@ dependencies {
     // Location services
     implementation("com.google.android.gms:play-services-location:21.2.0")
 
+    // Map
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

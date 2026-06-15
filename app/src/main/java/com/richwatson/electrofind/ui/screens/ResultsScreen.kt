@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +31,7 @@ fun ResultsScreen(
     val state by chargerViewModel.state.collectAsState()
     val chargers = chargerViewModel.filteredSortedChargers
     var showFilters by remember { mutableStateOf(false) }
+    var showMap by remember { mutableStateOf(false) }
 
     val goBack = {
         chargerViewModel.clearResults()
@@ -46,34 +49,57 @@ fun ResultsScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showFilters = !showFilters }) {
-                        Icon(Icons.Default.FilterList, "Filter / Sort")
+                    if (!showMap) {
+                        IconButton(onClick = { showFilters = !showFilters }) {
+                            Icon(Icons.Default.FilterList, "Filter / Sort")
+                        }
+                    }
+                    IconButton(onClick = { showMap = !showMap; showFilters = false }) {
+                        Icon(
+                            if (showMap) Icons.AutoMirrored.Filled.ViewList else Icons.Default.Map,
+                            contentDescription = if (showMap) "List view" else "Map view"
+                        )
                     }
                 }
             )
         }
     ) { padding ->
-        Column(Modifier.padding(padding)) {
-            if (showFilters) {
-                FilterBar(chargerViewModel)
-                HorizontalDivider()
-            }
-
-            if (state.isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (chargers.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(state.error ?: "No chargers found. Try a different location or connector filter.")
-                }
+        if (showMap) {
+            if (state.searchLat != 0.0 || state.searchLng != 0.0) {
+                ChargerMapView(
+                    chargers = chargers,
+                    searchLat = state.searchLat,
+                    searchLng = state.searchLng,
+                    modifier = Modifier.padding(padding).fillMaxSize()
+                )
             } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(chargers, key = { it.pk }) { charger ->
-                        ChargerCard(charger)
+                Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Map unavailable — search coordinates not set.")
+                }
+            }
+        } else {
+            Column(Modifier.padding(padding)) {
+                if (showFilters) {
+                    FilterBar(chargerViewModel)
+                    HorizontalDivider()
+                }
+
+                if (state.isLoading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (chargers.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(state.error ?: "No chargers found. Try a different location or connector filter.")
+                    }
+                } else {
+                    LazyColumn(
+                        contentPadding = PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(chargers, key = { it.pk }) { charger ->
+                            ChargerCard(charger)
+                        }
                     }
                 }
             }

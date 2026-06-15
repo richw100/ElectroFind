@@ -17,9 +17,11 @@ data class SearchState(
     val chargers: List<ChargingLocation> = emptyList(),
     val error: String? = null,
     val searchQuery: String = "",
+    val searchLat: Double = 0.0,
+    val searchLng: Double = 0.0,
     val sortOrder: SortOrder = SortOrder.PRICE_ASC,
     val speedFilter: SpeedFilter = SpeedFilter.ALL,
-    val connectorFilter: String = "ALL"  // "ALL", "CCS", "TYPE_2", "CHADEMO"
+    val connectorFilter: String = "ALL"
 )
 
 class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() {
@@ -65,12 +67,17 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
                 _state.value = _state.value.copy(isLoading = false, error = "Location not found: $name")
                 return@launch
             }
+            _state.value = _state.value.copy(searchLat = coords.first, searchLng = coords.second)
             doSearch(coords.first, coords.second, socketGroups)
         }
     }
 
     fun searchByCoordinates(lat: Double, lng: Double, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
-        _state.value = _state.value.copy(isLoading = true, error = null, searchQuery = "%.4f, %.4f".format(lat, lng))
+        _state.value = _state.value.copy(
+            isLoading = true, error = null,
+            searchQuery = "%.4f, %.4f".format(lat, lng),
+            searchLat = lat, searchLng = lng
+        )
         viewModelScope.launch {
             doSearch(lat, lng, socketGroups)
         }
