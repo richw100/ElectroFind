@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+**/build/
+*.hprof
+
+# Android
+local.properties
+*.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+*.iws
+.DS_Store
+
+# Kotlin
+*.class
+
+# Test results
+test-results/
