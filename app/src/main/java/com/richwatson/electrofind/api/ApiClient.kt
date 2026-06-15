@@ -20,6 +20,7 @@ object ApiClient {
         val authInterceptor = Interceptor { chain ->
             val original = chain.request()
             val builder = original.newBuilder()
+                .header("Accept", "application/json")
                 .header("Origin", "https://electroverse.com")
                 .header("Referer", "https://electroverse.com/map")
                 .header("X-Dui", deviceUid)

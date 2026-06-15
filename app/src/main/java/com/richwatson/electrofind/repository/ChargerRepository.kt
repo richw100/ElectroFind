@@ -92,13 +92,35 @@ class ChargerRepository(
                 Log.w(TAG, "Tile $zoom/$x/$y returned HTTP ${response.code()}")
                 return@withContext emptyList()
             }
-            val body = response.body()?.string() ?: return@withContext emptyList()
-            Log.d(TAG, "Tile $zoom/$x/$y response (first 500 chars): ${body.take(500)}")
-            parseTilePks(body)
+            val bytes = response.body()?.bytes() ?: return@withContext emptyList()
+            val pks = extractPksFromBytes(bytes)
+            Log.d(TAG, "Tile $zoom/$x/$y: ${bytes.size} bytes → ${pks.size} PKs: $pks")
+            pks
         } catch (e: Exception) {
             Log.e(TAG, "Tile fetch failed for $zoom/$x/$y", e)
             emptyList()
         }
+    }
+
+    // Tile API always returns application/x-protobuf. Charger PKs are stored as
+    // the Elasticsearch _id field which is a plain UTF-8 string in the binary.
+    // We extract all runs of 5–8 ASCII digits from the raw bytes to find them.
+    private fun extractPksFromBytes(bytes: ByteArray): List<Long> {
+        val pks = mutableListOf<Long>()
+        var run = StringBuilder()
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            if (c in 0x30..0x39) { // ASCII '0'..'9'
+                run.append(c.toChar())
+            } else {
+                if (run.length in 5..8) {
+                    run.toString().toLongOrNull()?.let { pks.add(it) }
+                }
+                run.clear()
+            }
+        }
+        if (run.length in 5..8) run.toString().toLongOrNull()?.let { pks.add(it) }
+        return pks.distinct()
     }
 
     // The tile response format isn't captured in the Burp file (all responses were 308 redirects
@@ -115,7 +137,17 @@ class ChargerRepository(
                 }
                 root.isJsonObject -> {
                     val obj = root.asJsonObject
-                    // Try common wrapper keys
+                    // Elasticsearch shape: { hits: { hits: [ { _id: "123" }, ... ] } }
+                    val hitsOuter = obj.getAsJsonObject("hits")
+                    if (hitsOuter != null) {
+                        val hitsInner = hitsOuter.getAsJsonArray("hits")
+                        if (hitsInner != null) {
+                            return hitsInner.mapNotNull { el ->
+                                el.asJsonObject.get("_id")?.asString?.toLongOrNull()
+                            }
+                        }
+                    }
+                    // Fallback: common wrapper keys
                     val arrayEl = obj.get("results")
                         ?: obj.get("features")
                         ?: obj.get("locations")
