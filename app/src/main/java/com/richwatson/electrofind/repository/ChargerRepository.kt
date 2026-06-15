@@ -74,7 +74,13 @@ class ChargerRepository(
             }.awaitAll()
 
             val chargers = chargerResults.filterNotNull()
-            Log.d(TAG, "Retrieved details for ${chargers.size} chargers")
+                .filter { c ->
+                    val clat = c.coordinates.latitude
+                    val clng = c.coordinates.longitude
+                    clat != 0.0 && clng != 0.0 &&
+                    distanceMiles(lat, lng, clat, clng) <= 3.0
+                }
+            Log.d(TAG, "Retrieved details for ${chargers.size} chargers within 3 miles")
             Result.success(chargers)
         } catch (e: Exception) {
             Log.e(TAG, "searchChargers failed", e)
@@ -103,23 +109,31 @@ class ChargerRepository(
     }
 
     // Tile API always returns application/x-protobuf. Charger PKs are stored as
-    // the Elasticsearch _id field which is a plain UTF-8 string in the binary.
-    // We extract all runs of 5–8 ASCII digits from the raw bytes to find them.
+    // the Elasticsearch _id field — a plain UTF-8 string. In protobuf wire format,
+    // a string is encoded as [length varint][bytes]. For 5–8 digit PKs the length
+    // fits in one byte (< 128), so we look for a byte whose value equals the count
+    // of ASCII digit bytes that immediately follow it. This is far more precise than
+    // scanning for any digit run, avoiding false positives from other numeric fields.
     private fun extractPksFromBytes(bytes: ByteArray): List<Long> {
         val pks = mutableListOf<Long>()
-        var run = StringBuilder()
-        for (b in bytes) {
-            val c = b.toInt() and 0xFF
-            if (c in 0x30..0x39) { // ASCII '0'..'9'
-                run.append(c.toChar())
-            } else {
-                if (run.length in 5..8) {
-                    run.toString().toLongOrNull()?.let { pks.add(it) }
+        var i = 0
+        while (i < bytes.size) {
+            val len = bytes[i].toInt() and 0xFF
+            if (len in 5..8 && i + len < bytes.size) {
+                var allDigits = true
+                for (j in 1..len) {
+                    val c = bytes[i + j].toInt() and 0xFF
+                    if (c !in 0x30..0x39) { allDigits = false; break }
                 }
-                run.clear()
+                if (allDigits) {
+                    val numStr = (1..len).map { (bytes[i + it].toInt() and 0xFF).toChar() }.joinToString("")
+                    numStr.toLongOrNull()?.let { pks.add(it) }
+                    i += len + 1
+                    continue
+                }
             }
+            i++
         }
-        if (run.length in 5..8) run.toString().toLongOrNull()?.let { pks.add(it) }
         return pks.distinct()
     }
 
@@ -193,6 +207,16 @@ class ChargerRepository(
             Log.e(TAG, "fetchChargingLocation($pk) failed", e)
             null
         }
+    }
+
+    private fun distanceMiles(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+        val R = 3958.8 // Earth radius in miles
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLng = Math.toRadians(lng2 - lng1)
+        val a = Math.sin(dLat / 2).let { it * it } +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLng / 2).let { it * it }
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     }
 
     companion object {

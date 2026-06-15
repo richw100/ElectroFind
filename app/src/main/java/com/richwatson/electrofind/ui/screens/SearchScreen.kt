@@ -41,10 +41,10 @@ fun SearchScreen(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            getCurrentLocation(fusedLocationClient) { lat, lng ->
-                chargerViewModel.searchByCoordinates(lat, lng)
-                onResultsReady()
-            }
+            getCurrentLocation(fusedLocationClient,
+                onResult = { lat, lng -> chargerViewModel.searchByCoordinates(lat, lng) },
+                onError = { locationError = it }
+            )
         } else {
             locationError = "Location permission denied"
         }
@@ -109,10 +109,13 @@ fun SearchScreen(
                             context, Manifest.permission.ACCESS_FINE_LOCATION
                         ) == PackageManager.PERMISSION_GRANTED
                         if (hasPerm) {
-                            getCurrentLocation(fusedLocationClient) { lat, lng ->
-                                chargerViewModel.searchByCoordinates(lat, lng)
-                                onResultsReady()
-                            }
+                            locationError = null
+                            getCurrentLocation(fusedLocationClient,
+                                onResult = { lat, lng ->
+                                    chargerViewModel.searchByCoordinates(lat, lng)
+                                },
+                                onError = { locationError = it }
+                            )
                         } else {
                             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                         }
@@ -147,8 +150,24 @@ fun SearchScreen(
 @Suppress("MissingPermission")
 private fun getCurrentLocation(
     client: com.google.android.gms.location.FusedLocationProviderClient,
-    onResult: (Double, Double) -> Unit
+    onResult: (Double, Double) -> Unit,
+    onError: (String) -> Unit
 ) {
-    client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
-        .addOnSuccessListener { loc -> loc?.let { onResult(it.latitude, it.longitude) } }
+    // Try last known location first (instant, works indoors)
+    client.lastLocation.addOnSuccessListener { loc ->
+        if (loc != null) {
+            onResult(loc.latitude, loc.longitude)
+        } else {
+            // Fall back to a fresh fix
+            client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener { freshLoc ->
+                    if (freshLoc != null) {
+                        onResult(freshLoc.latitude, freshLoc.longitude)
+                    } else {
+                        onError("Could not get location — ensure GPS is enabled")
+                    }
+                }
+                .addOnFailureListener { onError("Location error: ${it.message}") }
+        }
+    }.addOnFailureListener { onError("Location error: ${it.message}") }
 }

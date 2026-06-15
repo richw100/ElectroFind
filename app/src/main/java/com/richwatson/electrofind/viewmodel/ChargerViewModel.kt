@@ -99,4 +99,8 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
     fun setConnectorFilter(connector: String) {
         _state.value = _state.value.copy(connectorFilter = connector)
     }
+
+    fun clearResults() {
+        _state.value = _state.value.copy(chargers = emptyList(), error = null)
+    }
 }

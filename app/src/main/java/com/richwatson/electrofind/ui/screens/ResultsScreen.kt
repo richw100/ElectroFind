@@ -1,5 +1,6 @@
 package com.richwatson.electrofind.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,12 +30,18 @@ fun ResultsScreen(
     val chargers = chargerViewModel.filteredSortedChargers
     var showFilters by remember { mutableStateOf(false) }
 
+    val goBack = {
+        chargerViewModel.clearResults()
+        onBack()
+    }
+    BackHandler { goBack() }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("${chargers.size} chargers near ${state.searchQuery}") },
+                title = { Text("${chargers.size} chargers within 3 miles of ${state.searchQuery}") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = goBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
