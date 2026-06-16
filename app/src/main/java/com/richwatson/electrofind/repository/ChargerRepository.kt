@@ -22,6 +22,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import com.google.gson.annotations.SerializedName
@@ -120,7 +122,7 @@ class ChargerRepository(
             }.awaitAll()
         }.flatten().distinct()
 
-        val toFetch = pks.take(50)
+        val toFetch = pks
         val total = toFetch.size
         val done = AtomicInteger(0)
         val nullCount = AtomicInteger(0)
@@ -129,13 +131,16 @@ class ChargerRepository(
         val sentCount = AtomicInteger(0)
         onStatus("Found $total locations, checking details…", 0f)
 
+        val semaphore = Semaphore(10)
         coroutineScope {
             toFetch.map { pk ->
                 async(Dispatchers.IO) {
                     val t0 = System.currentTimeMillis()
                     try {
-                        val charger = withTimeout(8_000L) {
-                            fetchChargingLocation(pk.toString())
+                        val charger = semaphore.withPermit {
+                            withTimeout(8_000L) {
+                                fetchChargingLocation(pk.toString())
+                            }
                         }
                         val n = done.incrementAndGet()
                         if (n == 1 || n % 5 == 0 || n == total) {
@@ -206,7 +211,7 @@ class ChargerRepository(
         var i = 0
         while (i < bytes.size) {
             val len = bytes[i].toInt() and 0xFF
-            if (len in 5..8 && i + len < bytes.size) {
+            if (len in 4..10 && i + len < bytes.size) {
                 var allDigits = true
                 for (j in 1..len) {
                     val c = bytes[i + j].toInt() and 0xFF
