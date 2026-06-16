@@ -12,6 +12,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.richwatson.electrofind.ui.screens.BrowseMapScreen
 import com.richwatson.electrofind.ui.screens.LoginScreen
 import com.richwatson.electrofind.ui.screens.ResultsScreen
 import com.richwatson.electrofind.ui.screens.SearchScreen
@@ -57,7 +58,22 @@ class MainActivity : ComponentActivity() {
                                 navController.navigate("results") {
                                     launchSingleTop = true
                                 }
+                            },
+                            onBrowseMap = {
+                                navController.navigate("browse_map")
                             }
+                        )
+                    }
+                    composable("browse_map") {
+                        val state by chargerViewModel.state.collectAsState()
+                        BrowseMapScreen(
+                            initialLat = if (state.searchLat != 0.0) state.searchLat else 46.0,
+                            initialLng = if (state.searchLng != 0.0) state.searchLng else 2.0,
+                            onLocationSelected = { lat, lng ->
+                                chargerViewModel.searchByCoordinates(lat, lng)
+                                navController.navigate("results") { launchSingleTop = true }
+                            },
+                            onBack = { navController.popBackStack() }
                         )
                     }
                     composable("results") {

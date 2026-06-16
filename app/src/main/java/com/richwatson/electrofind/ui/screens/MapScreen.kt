@@ -6,6 +6,16 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -14,16 +24,51 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.richwatson.electrofind.api.models.ChargingLocation
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.Marker
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BrowseMapScreen(
+    initialLat: Double,
+    initialLng: Double,
+    onLocationSelected: (Double, Double) -> Unit,
+    onBack: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Browse map") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        ChargerMapView(
+            chargers = emptyList(),
+            searchLat = initialLat,
+            searchLng = initialLng,
+            initialZoom = 8.0,
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            onLocationSelected = onLocationSelected
+        )
+    }
+}
 
 @Composable
 fun ChargerMapView(
     chargers: List<ChargingLocation>,
     searchLat: Double,
     searchLng: Double,
-    modifier: Modifier = Modifier
+    initialZoom: Double = 14.0,
+    modifier: Modifier = Modifier,
+    onLocationSelected: ((Double, Double) -> Unit)? = null
 ) {
     val context = LocalContext.current
 
@@ -32,7 +77,7 @@ fun ChargerMapView(
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             isTilesScaledToDpi = true
-            controller.setZoom(14.0)
+            controller.setZoom(initialZoom)
             controller.setCenter(GeoPoint(searchLat, searchLng))
         }
     }
@@ -62,6 +107,16 @@ fun ChargerMapView(
             }
             mapView.overlays.add(marker)
         }
+        if (onLocationSelected != null) {
+            mapView.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
+                override fun singleTapConfirmedHelper(p: GeoPoint) = false
+                override fun longPressHelper(p: GeoPoint): Boolean {
+                    onLocationSelected(p.latitude, p.longitude)
+                    return true
+                }
+            }))
+        }
+
         mapView.invalidate()
     }
 

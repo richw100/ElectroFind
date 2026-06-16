@@ -5,9 +5,11 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -29,7 +31,8 @@ import kotlinx.coroutines.delay
 @Composable
 fun SearchScreen(
     chargerViewModel: ChargerViewModel,
-    onResultsReady: () -> Unit
+    onResultsReady: () -> Unit,
+    onBrowseMap: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -199,6 +202,12 @@ fun SearchScreen(
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     Text("Searching for chargers…")
                 }
+            }
+
+            TextButton(onClick = onBrowseMap, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Browse map")
             }
 
             state.error?.let { err ->

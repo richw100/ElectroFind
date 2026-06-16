@@ -73,7 +73,10 @@ fun ResultsScreen(
                     chargers = chargers,
                     searchLat = state.searchLat,
                     searchLng = state.searchLng,
-                    modifier = Modifier.padding(padding).fillMaxSize()
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    onLocationSelected = { lat, lng ->
+                        chargerViewModel.searchByCoordinates(lat, lng)
+                    }
                 )
             } else {
                 Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
