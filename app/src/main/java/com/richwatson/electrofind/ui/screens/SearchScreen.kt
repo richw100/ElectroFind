@@ -18,10 +18,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,8 +34,10 @@ fun SearchScreen(
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val state by chargerViewModel.state.collectAsState()
+    val suggestions by chargerViewModel.suggestions.collectAsState()
     var searchText by remember { mutableStateOf("") }
     var locationError by remember { mutableStateOf<String?>(null) }
+    var suggestionsExpanded by remember { mutableStateOf(false) }
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
@@ -56,6 +60,23 @@ fun SearchScreen(
         }
     }
 
+    // Debounced autocomplete: fire after 400ms of no typing; cancel if text changes again
+    LaunchedEffect(searchText) {
+        if (searchText.length >= 2) {
+            delay(400)
+            chargerViewModel.fetchSuggestions(searchText)
+            suggestionsExpanded = true
+        } else {
+            chargerViewModel.clearSuggestions()
+            suggestionsExpanded = false
+        }
+    }
+
+    // Keep expanded state in sync with whether we have suggestions
+    LaunchedEffect(suggestions) {
+        if (suggestions.isEmpty()) suggestionsExpanded = false
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("ElectroFind") }) }
     ) { padding ->
@@ -68,26 +89,68 @@ fun SearchScreen(
         ) {
             Text("Find EV chargers sorted by price", style = MaterialTheme.typography.titleMedium)
 
-            OutlinedTextField(
-                value = searchText,
-                onValueChange = { searchText = it },
-                label = { Text("Town, city or postcode") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = {
-                    keyboardController?.hide()
-                    chargerViewModel.searchByPlaceName(searchText)
-                }),
-                trailingIcon = {
-                    IconButton(onClick = {
+            // Text field + autocomplete dropdown
+            Box {
+                OutlinedTextField(
+                    value = searchText,
+                    onValueChange = { searchText = it },
+                    label = { Text("Town, city or postcode") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
                         keyboardController?.hide()
+                        chargerViewModel.clearSuggestions()
                         chargerViewModel.searchByPlaceName(searchText)
-                    }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    }),
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            keyboardController?.hide()
+                            chargerViewModel.clearSuggestions()
+                            chargerViewModel.searchByPlaceName(searchText)
+                        }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
+                    }
+                )
+                // Dropdown anchored to the bottom of the Box (below the text field)
+                DropdownMenu(
+                    expanded = suggestionsExpanded && suggestions.isNotEmpty(),
+                    onDismissRequest = { suggestionsExpanded = false },
+                    properties = PopupProperties(focusable = false),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    suggestions.forEach { suggestion ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        suggestion.primaryName,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    if (suggestion.secondaryName.isNotEmpty()) {
+                                        Text(
+                                            suggestion.secondaryName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                searchText = suggestion.primaryName
+                                suggestionsExpanded = false
+                                chargerViewModel.clearSuggestions()
+                                keyboardController?.hide()
+                                chargerViewModel.searchByCoordinates(
+                                    suggestion.lat, suggestion.lng,
+                                    label = suggestion.primaryName
+                                )
+                            }
+                        )
                     }
                 }
-            )
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -96,6 +159,7 @@ fun SearchScreen(
                 Button(
                     onClick = {
                         keyboardController?.hide()
+                        chargerViewModel.clearSuggestions()
                         chargerViewModel.searchByPlaceName(searchText)
                     },
                     modifier = Modifier.weight(1f),
@@ -153,12 +217,10 @@ private fun getCurrentLocation(
     onResult: (Double, Double) -> Unit,
     onError: (String) -> Unit
 ) {
-    // Try last known location first (instant, works indoors)
     client.lastLocation.addOnSuccessListener { loc ->
         if (loc != null) {
             onResult(loc.latitude, loc.longitude)
         } else {
-            // Fall back to a fresh fix
             client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                 .addOnSuccessListener { freshLoc ->
                     if (freshLoc != null) {

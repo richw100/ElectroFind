@@ -11,6 +11,7 @@ import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.ChargingLocationWrapper
 import com.richwatson.electrofind.api.models.GraphQLRequest
 import com.richwatson.electrofind.api.models.GraphQLResponse
+import com.richwatson.electrofind.api.models.LocationSuggestion
 import com.richwatson.electrofind.api.models.TileLocation
 import com.richwatson.electrofind.util.TileCalculator
 import kotlinx.coroutines.CancellationException
@@ -23,8 +24,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import com.google.gson.annotations.SerializedName
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class ChargerRepository(
     private val service: ElectroverseService,
@@ -33,8 +39,57 @@ class ChargerRepository(
     private val gson = Gson()
     private val TAG = "ChargerRepository"
 
-    // Default connector types to search for — CCS and Type 2 cover most EVs
     private val defaultSocketGroups = listOf("CCS", "TYPE_2")
+
+    private val nominatimClient = OkHttpClient.Builder()
+        .callTimeout(5, TimeUnit.SECONDS)
+        .build()
+
+    suspend fun fetchLocationSuggestions(query: String): List<LocationSuggestion> = withContext(Dispatchers.IO) {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            // Photon uses Elasticsearch prefix matching, so partial words like "chelt" → Cheltenham
+            val url = "https://photon.komoot.io/api/?q=$encoded&limit=5&lang=en"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ElectroFind/1.0 (Android)")
+                .build()
+            val body = nominatimClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                response.body?.string() ?: return@withContext emptyList()
+            }
+            val response: PhotonResponse = gson.fromJson(body, PhotonResponse::class.java)
+            response.features.mapNotNull { feature ->
+                val props = feature.properties
+                val name = props.name ?: return@mapNotNull null
+                val coords = feature.geometry.coordinates
+                if (coords.size < 2) return@mapNotNull null
+                val lng = coords[0]
+                val lat = coords[1]
+                val secondary = listOfNotNull(
+                    props.city?.takeIf { it != name },
+                    props.county ?: props.state,
+                    props.country
+                ).joinToString(", ")
+                val displayName = if (secondary.isEmpty()) name else "$name, $secondary"
+                LocationSuggestion(displayName, lat, lng)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchLocationSuggestions failed", e)
+            emptyList()
+        }
+    }
+
+    private data class PhotonResponse(val features: List<PhotonFeature>)
+    private data class PhotonFeature(val geometry: PhotonGeometry, val properties: PhotonProperties)
+    private data class PhotonGeometry(val coordinates: List<Double>)  // [lng, lat]
+    private data class PhotonProperties(
+        val name: String?,
+        val city: String?,
+        val county: String?,
+        val state: String?,
+        val country: String?
+    )
 
     suspend fun geocode(locationName: String): Pair<Double, Double>? = withContext(Dispatchers.IO) {
         try {

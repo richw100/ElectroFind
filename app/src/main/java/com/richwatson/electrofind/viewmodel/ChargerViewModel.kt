@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.LocationSuggestion
 import com.richwatson.electrofind.repository.ChargerRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -39,11 +40,14 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
     private val _state = MutableStateFlow(SearchState())
     val state: StateFlow<SearchState> = _state.asStateFlow()
 
-    // One-shot navigation event: emitted exactly once when a search is ready to show results.
     private val _navigateToResults = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val navigateToResults: SharedFlow<Unit> = _navigateToResults.asSharedFlow()
 
+    private val _suggestions = MutableStateFlow<List<LocationSuggestion>>(emptyList())
+    val suggestions: StateFlow<List<LocationSuggestion>> = _suggestions.asStateFlow()
+
     private var searchJob: Job? = null
+    private var suggestionsJob: Job? = null
 
     val filteredSortedChargers: List<ChargingLocation>
         get() {
@@ -94,11 +98,23 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
         }
     }
 
-    fun searchByCoordinates(lat: Double, lng: Double, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
+    fun fetchSuggestions(query: String) {
+        suggestionsJob?.cancel()
+        suggestionsJob = viewModelScope.launch {
+            _suggestions.value = repository.fetchLocationSuggestions(query)
+        }
+    }
+
+    fun clearSuggestions() {
+        suggestionsJob?.cancel()
+        _suggestions.value = emptyList()
+    }
+
+    fun searchByCoordinates(lat: Double, lng: Double, label: String? = null, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
         searchJob?.cancel()
         _state.update { it.copy(
             isLoading = true, error = null,
-            searchQuery = "%.4f, %.4f".format(lat, lng),
+            searchQuery = label ?: "%.4f, %.4f".format(lat, lng),
             searchLat = lat, searchLng = lng,
             chargers = emptyList()
         ) }
