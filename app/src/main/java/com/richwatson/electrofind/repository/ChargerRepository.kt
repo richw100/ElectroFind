@@ -13,11 +13,17 @@ import com.richwatson.electrofind.api.models.GraphQLRequest
 import com.richwatson.electrofind.api.models.GraphQLResponse
 import com.richwatson.electrofind.api.models.TileLocation
 import com.richwatson.electrofind.util.TileCalculator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.Locale
 
 class ChargerRepository(
@@ -41,51 +47,77 @@ class ChargerRepository(
         }
     }
 
-    suspend fun searchChargers(
+    fun searchChargers(
         lat: Double,
         lng: Double,
         zoom: Int = 12,
         gridRadius: Int = 1,
-        socketGroups: List<String> = defaultSocketGroups
-    ): Result<List<ChargingLocation>> = coroutineScope {
-        try {
-            val centre = TileCalculator.latLngToTile(lat, lng, zoom)
-            val tiles = TileCalculator.surroundingTiles(centre, gridRadius)
-            Log.d(TAG, "Fetching ${tiles.size} tiles at zoom $zoom around ($lat, $lng)")
+        socketGroups: List<String> = defaultSocketGroups,
+        onStatus: (status: String, progress: Float) -> Unit = { _, _ -> }
+    ): Flow<ChargingLocation> = channelFlow {
+        onStatus("Fetching tile data…", 0f)
+        val centre = TileCalculator.latLngToTile(lat, lng, zoom)
+        val tiles = TileCalculator.surroundingTiles(centre, gridRadius)
 
-            // Fetch all tiles in parallel
-            val tileResults = tiles.map { tile ->
-                async {
-                    fetchTilePks(tile.zoom, tile.x, tile.y, socketGroups)
+        val pks = coroutineScope {
+            tiles.map { tile ->
+                async(Dispatchers.IO) { fetchTilePks(tile.zoom, tile.x, tile.y, socketGroups) }
+            }.awaitAll()
+        }.flatten().distinct()
+
+        val toFetch = pks.take(50)
+        val total = toFetch.size
+        val done = AtomicInteger(0)
+        val nullCount = AtomicInteger(0)
+        val noCoordCount = AtomicInteger(0)
+        val tooFarCount = AtomicInteger(0)
+        val sentCount = AtomicInteger(0)
+        onStatus("Found $total locations, checking details…", 0f)
+
+        coroutineScope {
+            toFetch.map { pk ->
+                async(Dispatchers.IO) {
+                    val t0 = System.currentTimeMillis()
+                    try {
+                        val charger = withTimeout(8_000L) {
+                            fetchChargingLocation(pk.toString())
+                        }
+                        val n = done.incrementAndGet()
+                        if (n == 1 || n % 5 == 0 || n == total) {
+                            onStatus("Checked $n/$total locations", n.toFloat() / total)
+                        }
+                        if (charger == null) { nullCount.incrementAndGet(); return@async }
+                        val clat = charger.coordinates.latitude
+                        val clng = charger.coordinates.longitude
+                        if (clat == 0.0 && clng == 0.0) { noCoordCount.incrementAndGet(); return@async }
+                        val dist = distanceMiles(lat, lng, clat, clng)
+                        if (dist > 3.0) { tooFarCount.incrementAndGet(); return@async }
+                        sentCount.incrementAndGet()
+                        send(charger)
+                    } catch (e: TimeoutCancellationException) {
+                        nullCount.incrementAndGet()
+                        val n = done.incrementAndGet()
+                        if (n == 1 || n % 5 == 0 || n == total) {
+                            onStatus("Checked $n/$total locations", n.toFloat() / total)
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e(TAG, "pk=$pk failed after ${System.currentTimeMillis() - t0}ms", e)
+                        nullCount.incrementAndGet()
+                        val n = done.incrementAndGet()
+                        if (n == 1 || n % 5 == 0 || n == total) {
+                            onStatus("Checked $n/$total locations", n.toFloat() / total)
+                        }
+                    }
                 }
             }.awaitAll()
-
-            val pks = tileResults.flatten().distinct()
-            Log.d(TAG, "Found ${pks.size} unique location PKs from tiles")
-
-            if (pks.isEmpty()) {
-                return@coroutineScope Result.success(emptyList())
-            }
-
-            // Fetch charger details in parallel (cap at 50 to avoid hammering the API)
-            val limitedPks = pks.take(50)
-            val chargerResults = limitedPks.map { pk ->
-                async { fetchChargingLocation(pk.toString()) }
-            }.awaitAll()
-
-            val chargers = chargerResults.filterNotNull()
-                .filter { c ->
-                    val clat = c.coordinates.latitude
-                    val clng = c.coordinates.longitude
-                    clat != 0.0 && clng != 0.0 &&
-                    distanceMiles(lat, lng, clat, clng) <= 3.0
-                }
-            Log.d(TAG, "Retrieved details for ${chargers.size} chargers within 3 miles")
-            Result.success(chargers)
-        } catch (e: Exception) {
-            Log.e(TAG, "searchChargers failed", e)
-            Result.failure(e)
         }
+
+        val summary = "Search (%.4f, %.4f) | $total checked | ${sentCount.get()} nearby | ${tooFarCount.get()} too far | ${noCoordCount.get()} no coords | ${nullCount.get()} failed".format(lat, lng)
+        Log.d(TAG, "SUMMARY: $summary")
+        onStatus(summary, 1f)
+        Log.d(TAG, "searchChargers: onStatus(summary) done, lambda ending")
     }
 
     private suspend fun fetchTilePks(
@@ -223,53 +255,34 @@ class ChargerRepository(
         private val CHARGING_LOCATION_QUERY = """
             query chargingLocation(${'$'}pk: String!) {
               chargingLocation(pk: ${'$'}pk) {
-                pk chargingLocationPk externalId name address city postalCode country
-                coordinates isEjnLocation
-                operator { pk name logoDark hasPartneredLocations __typename }
-                openingHours { twentyFourSeven __typename }
-                capabilities { __typename ... on EJNApp { name } ... on Card { name } ... on Contactless { name } ... on Free { name } }
+                pk name address city coordinates
+                operator { name }
                 evses {
-                  totalCount
                   edges {
                     node {
-                      pk physicalReference status
+                      status
                       connectors {
                         edges {
                           node {
-                            pk isChargingFree kilowatts speed
-                            standard { pk humanName name __typename }
+                            isChargingFree kilowatts
+                            standard { humanName }
                             priceComponents {
                               __typename
                               ... on ConsumptionRate {
-                                currencyDetails { symbol decimalDigits minorUnitConversion __typename }
-                                unitAmount perUnit
-                              }
-                              ... on TimeRate {
-                                currencyDetails { symbol decimalDigits minorUnitConversion __typename }
-                                unitAmount perUnit
-                              }
-                              ... on ParkingTimeRate {
-                                currencyDetails { symbol decimalDigits minorUnitConversion __typename }
+                                currencyDetails { symbol decimalDigits minorUnitConversion }
                                 unitAmount perUnit
                               }
                               ... on ConnectionFee {
-                                currencyDetails { symbol decimalDigits minorUnitConversion __typename }
+                                currencyDetails { symbol decimalDigits minorUnitConversion }
                                 unitAmount
                               }
                             }
-                            __typename
                           }
-                          __typename
                         }
-                        __typename
                       }
-                      __typename
                     }
-                    __typename
                   }
-                  __typename
                 }
-                __typename
               }
             }
         """.trimIndent()

@@ -29,7 +29,10 @@ fun ResultsScreen(
     onBack: () -> Unit
 ) {
     val state by chargerViewModel.state.collectAsState()
-    val chargers = chargerViewModel.filteredSortedChargers
+    // remember(state) forces ResultsScreen to read `state` in its own scope, so when state
+    // changes (chargers added, loading completes) ResultsScreen itself recomposes and chargers
+    // is recomputed — without this, only nested Scaffold lambdas recompose and chargers stays stale
+    val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
     var showFilters by remember { mutableStateOf(false) }
     var showMap by remember { mutableStateOf(false) }
 
@@ -79,18 +82,60 @@ fun ResultsScreen(
             }
         } else {
             Column(Modifier.padding(padding)) {
+                if (state.isLoading) {
+                    if (state.fetchProgress > 0f) {
+                        LinearProgressIndicator(
+                            progress = { state.fetchProgress },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    if (state.loadingStatus.isNotEmpty()) {
+                        Text(
+                            state.loadingStatus,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
+                        )
+                    }
+                }
                 if (showFilters) {
                     FilterBar(chargerViewModel)
                     HorizontalDivider()
                 }
 
-                if (state.isLoading) {
+                if (state.isLoading && chargers.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            if (state.loadingStatus.isNotEmpty()) {
+                                Text(
+                                    state.loadingStatus,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 } else if (chargers.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Text(state.error ?: "No chargers found. Try a different location or connector filter.")
+                        if (state.loadingStatus.isNotEmpty()) {
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                state.loadingStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 } else {
                     LazyColumn(

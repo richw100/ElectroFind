@@ -50,8 +50,8 @@ fun SearchScreen(
         }
     }
 
-    LaunchedEffect(state.chargers, state.error) {
-        if (state.chargers.isNotEmpty() && !state.isLoading) {
+    LaunchedEffect(Unit) {
+        chargerViewModel.navigateToResults.collect {
             onResultsReady()
         }
     }

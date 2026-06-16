@@ -1,18 +1,15 @@
 package com.richwatson.electrofind.api
 
-import android.util.Log
 import com.richwatson.electrofind.auth.TokenManager
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 object ApiClient {
     private const val BASE_URL = "https://electroverse.com/"
-    private const val TAG = "ApiClient"
-
     // Stable device ID persisted via TokenManager (set on first build)
     private var deviceUid: String = UUID.randomUUID().toString()
 
@@ -47,12 +44,15 @@ object ApiClient {
             chain.proceed(builder.build())
         }
 
-        val logging = HttpLoggingInterceptor { message -> Log.d(TAG, message) }
-            .apply { level = HttpLoggingInterceptor.Level.BODY }
+        val dispatcher = okhttp3.Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 20
+        }
 
         val client = OkHttpClient.Builder()
+            .dispatcher(dispatcher)
             .addInterceptor(authInterceptor)
-            .addInterceptor(logging)
+            .callTimeout(10, TimeUnit.SECONDS)
             .followRedirects(true)
             .build()
 
