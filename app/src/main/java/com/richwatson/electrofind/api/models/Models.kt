@@ -44,20 +44,24 @@ data class ChargingLocationWrapper(
 
 data class ChargingLocation(
     val pk: Long,
-    val chargingLocationPk: String,
-    val externalId: String,
+    val chargingLocationPk: String?,
+    val externalId: String?,
     val name: String,
     val address: String,
     val city: String,
     val postalCode: String?,
-    val country: String,
+    val country: String?,
     val coordinates: Coordinates,
     val isEjnLocation: Boolean,
     val operator: Operator,
     val openingHours: OpeningHours?,
-    val capabilities: List<Capability>,
-    val evses: EvseConnection
+    val capabilities: List<Capability>?,
+    val evses: EvseConnection,
+    val cachedAt: Long = 0L
 ) {
+    // True when loaded from cache and data is older than one week
+    val isStale: Boolean get() = cachedAt > 0 && System.currentTimeMillis() - cachedAt > STALE_MS
+
     // Convenience: primary price per kWh (ConsumptionRate of first connector, in major units)
     val pricePerKwh: Double? get() {
         return evses.edges
@@ -99,6 +103,10 @@ data class ChargingLocation(
 
     val hasAvailableEvse: Boolean get() {
         return evses.edges.any { it.node.status == "AVAILABLE" }
+    }
+
+    companion object {
+        const val STALE_MS = 7 * 24 * 3600_000L
     }
 }
 

@@ -3,6 +3,7 @@ package com.richwatson.electrofind
 import android.app.Application
 import com.richwatson.electrofind.api.ApiClient
 import com.richwatson.electrofind.auth.TokenManager
+import com.richwatson.electrofind.db.AppDatabase
 import com.richwatson.electrofind.repository.ChargerRepository
 import org.osmdroid.config.Configuration
 import java.io.File
@@ -15,7 +16,8 @@ class ElectroFindApp : Application() {
         super.onCreate()
         tokenManager = TokenManager(this)
         val service = ApiClient.buildService(tokenManager)
-        repository = ChargerRepository(service, this)
+        val db = AppDatabase.getInstance(this)
+        repository = ChargerRepository(service, this, db.chargerDao())
 
         Configuration.getInstance().apply {
             userAgentValue = packageName

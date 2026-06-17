@@ -151,8 +151,15 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
                 Log.d("ChargerViewModel", "onCompletion: state updated, loadingStatus=${_state.value.loadingStatus}")
             }
             .collect { charger ->
-                Log.d("ChargerViewModel", "collect: ${charger.name}")
-                _state.update { it.copy(chargers = it.chargers + charger) }
+                Log.d("ChargerViewModel", "collect: ${charger.name} stale=${charger.isStale}")
+                _state.update { state ->
+                    val idx = state.chargers.indexOfFirst { it.pk == charger.pk }
+                    if (idx >= 0) {
+                        state.copy(chargers = state.chargers.toMutableList().also { it[idx] = charger })
+                    } else {
+                        state.copy(chargers = state.chargers + charger)
+                    }
+                }
             }
     }
 

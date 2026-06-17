@@ -4,7 +4,10 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -20,7 +23,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -92,8 +94,8 @@ fun SearchScreen(
         ) {
             Text("Find EV chargers sorted by price", style = MaterialTheme.typography.titleMedium)
 
-            // Text field + autocomplete dropdown
-            Box {
+            // Text field + inline autocomplete list
+            Column {
                 OutlinedTextField(
                     value = searchText,
                     onValueChange = { searchText = it },
@@ -116,21 +118,26 @@ fun SearchScreen(
                         }
                     }
                 )
-                // Dropdown anchored to the bottom of the Box (below the text field)
-                DropdownMenu(
-                    expanded = suggestionsExpanded && suggestions.isNotEmpty(),
-                    onDismissRequest = { suggestionsExpanded = false },
-                    properties = PopupProperties(focusable = false),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    suggestions.forEach { suggestion ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(
-                                        suggestion.primaryName,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
+                if (suggestionsExpanded && suggestions.isNotEmpty()) {
+                    Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+                        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+                            items(suggestions) { suggestion ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            searchText = suggestion.primaryName
+                                            suggestionsExpanded = false
+                                            chargerViewModel.clearSuggestions()
+                                            keyboardController?.hide()
+                                            chargerViewModel.searchByCoordinates(
+                                                suggestion.lat, suggestion.lng,
+                                                label = suggestion.primaryName
+                                            )
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                                ) {
+                                    Text(suggestion.primaryName, style = MaterialTheme.typography.bodyMedium)
                                     if (suggestion.secondaryName.isNotEmpty()) {
                                         Text(
                                             suggestion.secondaryName,
@@ -139,18 +146,9 @@ fun SearchScreen(
                                         )
                                     }
                                 }
-                            },
-                            onClick = {
-                                searchText = suggestion.primaryName
-                                suggestionsExpanded = false
-                                chargerViewModel.clearSuggestions()
-                                keyboardController?.hide()
-                                chargerViewModel.searchByCoordinates(
-                                    suggestion.lat, suggestion.lng,
-                                    label = suggestion.primaryName
-                                )
+                                HorizontalDivider()
                             }
-                        )
+                        }
                     }
                 }
             }
