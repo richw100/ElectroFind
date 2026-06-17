@@ -84,7 +84,7 @@ fun ResultsScreen(
                 }
             }
         } else {
-            Column(Modifier.padding(padding)) {
+            Column(Modifier.padding(padding).fillMaxSize()) {
                 if (state.isLoading) {
                     if (state.fetchProgress > 0f) {
                         LinearProgressIndicator(
