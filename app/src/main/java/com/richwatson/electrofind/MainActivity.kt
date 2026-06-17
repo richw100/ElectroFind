@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
                         BrowseMapScreen(
                             initialLat = if (state.searchLat != 0.0) state.searchLat else 46.0,
                             initialLng = if (state.searchLng != 0.0) state.searchLng else 2.0,
+                            chargerViewModel = chargerViewModel,
                             onLocationSelected = { lat, lng ->
                                 chargerViewModel.searchByCoordinates(lat, lng)
                                 navController.navigate("results") { launchSingleTop = true }
