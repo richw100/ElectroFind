@@ -18,12 +18,15 @@ import com.richwatson.electrofind.db.CachedOcmEntity
 import com.richwatson.electrofind.db.OcmDao
 import kotlin.math.abs
 
+class OcmApiKeyMissingException : Exception("No OCM API key set — add one in Settings")
+
 class OcmRepository(private val service: OcmApiService, private val dao: OcmDao) {
     private val gson = Gson()
 
-    suspend fun searchNearby(lat: Double, lng: Double): List<ChargingLocation> {
+    suspend fun searchNearby(lat: Double, lng: Double, apiKey: String): List<ChargingLocation> {
+        if (apiKey.isBlank()) throw OcmApiKeyMissingException()
         return try {
-            val pois = service.getNearby(latitude = lat, longitude = lng)
+            val pois = service.getNearby(latitude = lat, longitude = lng, apiKey = apiKey)
             pois.forEach { poi ->
                 dao.upsert(
                     CachedOcmEntity(
@@ -36,15 +39,17 @@ class OcmRepository(private val service: OcmApiService, private val dao: OcmDao)
                 )
             }
             pois.map { it.toChargingLocation() }
+        } catch (e: OcmApiKeyMissingException) {
+            throw e
         } catch (e: Exception) {
-            // Fallback: return cached entries within ~50km (0.45 degrees)
-            dao.getAll()
+            // Network failure — fall back to cached entries within ~50km (0.45 degrees)
+            val cached = dao.getAll()
                 .filter { abs(it.lat - lat) < 0.45 && abs(it.lng - lng) < 0.45 }
                 .mapNotNull {
-                    runCatching {
-                        gson.fromJson(it.json, OcmPoi::class.java).toChargingLocation()
-                    }.getOrNull()
+                    runCatching { gson.fromJson(it.json, OcmPoi::class.java).toChargingLocation() }.getOrNull()
                 }
+            if (cached.isEmpty()) throw e
+            cached
         }
     }
 }

@@ -2,20 +2,29 @@ package com.richwatson.electrofind.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.DataSource
+import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(chargerViewModel: ChargerViewModel, onBack: () -> Unit) {
+fun SettingsScreen(
+    chargerViewModel: ChargerViewModel,
+    appPreferences: AppPreferences,
+    onBack: () -> Unit
+) {
     val state by chargerViewModel.state.collectAsState()
+    var ocmKeyInput by remember { mutableStateOf(appPreferences.ocmApiKey) }
 
     Scaffold(
         topBar = {
@@ -33,7 +42,7 @@ fun SettingsScreen(chargerViewModel: ChargerViewModel, onBack: () -> Unit) {
             modifier = Modifier
                 .padding(padding)
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("Data source", style = MaterialTheme.typography.titleMedium)
             DataSource.entries.forEach { source ->
@@ -45,7 +54,7 @@ fun SettingsScreen(chargerViewModel: ChargerViewModel, onBack: () -> Unit) {
                 val desc = when (source) {
                     DataSource.ELECTROVERSE -> "Structured pricing, live availability via Electroverse"
                     DataSource.OCM -> "Community database, wider coverage, text-based pricing"
-                    DataSource.BOTH -> "Show results from both — Electroverse results sorted by price, OCM results at the bottom"
+                    DataSource.BOTH -> "Show results from both — Electroverse sorted by price, OCM appended below"
                 }
                 Card(
                     modifier = Modifier
@@ -76,6 +85,32 @@ fun SettingsScreen(chargerViewModel: ChargerViewModel, onBack: () -> Unit) {
                         }
                     }
                 }
+            }
+
+            HorizontalDivider()
+
+            Text("Open Charge Map API key", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Required for OCM searches. Register free at openchargemap.org",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = ocmKeyInput,
+                onValueChange = { ocmKeyInput = it },
+                label = { Text("API key") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    appPreferences.ocmApiKey = ocmKeyInput
+                })
+            )
+            Button(
+                onClick = { appPreferences.ocmApiKey = ocmKeyInput },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Save key")
             }
         }
     }

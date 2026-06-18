@@ -119,6 +119,16 @@ fun ResultsScreen(
                     FilterBar(chargerViewModel)
                     HorizontalDivider()
                 }
+                state.ocmError?.let { err ->
+                    Text(
+                        "OCM: $err",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                }
 
                 if (state.isLoading && chargers.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

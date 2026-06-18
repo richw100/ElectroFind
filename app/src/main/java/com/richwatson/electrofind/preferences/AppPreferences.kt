@@ -15,4 +15,8 @@ class AppPreferences(context: Context) {
         set(value) {
             prefs.edit().putString("data_source", value.name).apply()
         }
+
+    var ocmApiKey: String
+        get() = prefs.getString("ocm_api_key", "") ?: ""
+        set(value) { prefs.edit().putString("ocm_api_key", value.trim()).apply() }
 }

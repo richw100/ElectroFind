@@ -30,6 +30,7 @@ data class SearchState(
     val chargers: List<ChargingLocation> = emptyList(),
     val ocmChargers: List<ChargingLocation> = emptyList(),
     val error: String? = null,
+    val ocmError: String? = null,
     val searchQuery: String = "",
     val searchLat: Double = 0.0,
     val searchLng: Double = 0.0,
@@ -106,7 +107,7 @@ class ChargerViewModel(
     fun searchByPlaceName(name: String, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
         if (name.isBlank()) return
         searchJob?.cancel()
-        _state.update { it.copy(isLoadingEv = true, error = null, searchQuery = name, chargers = emptyList(), ocmChargers = emptyList()) }
+        _state.update { it.copy(isLoadingEv = true, error = null, ocmError = null, searchQuery = name, chargers = emptyList(), ocmChargers = emptyList()) }
         searchJob = viewModelScope.launch {
             val coords = repository.geocode(name)
             if (coords == null) {
@@ -138,7 +139,7 @@ class ChargerViewModel(
         searchJob?.cancel()
         _state.update {
             it.copy(
-                isLoadingEv = true, error = null,
+                isLoadingEv = true, error = null, ocmError = null,
                 searchQuery = label ?: "%.4f, %.4f".format(lat, lng),
                 searchLat = lat, searchLng = lng,
                 chargers = emptyList(),
@@ -197,10 +198,10 @@ class ChargerViewModel(
         viewModelScope.launch {
             _state.update { it.copy(isLoadingOcm = true) }
             try {
-                val results = ocmRepository.searchNearby(lat, lng)
+                val results = ocmRepository.searchNearby(lat, lng, appPreferences.ocmApiKey)
                 _state.update { it.copy(isLoadingOcm = false, ocmChargers = results) }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoadingOcm = false) }
+                _state.update { it.copy(isLoadingOcm = false, ocmError = e.message ?: "OCM search failed") }
             }
         }
     }

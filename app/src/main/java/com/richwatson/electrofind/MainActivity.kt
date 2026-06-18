@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
                     composable("settings") {
                         SettingsScreen(
                             chargerViewModel = chargerViewModel,
+                            appPreferences = (application as ElectroFindApp).appPreferences,
                             onBack = { navController.popBackStack() }
                         )
                     }

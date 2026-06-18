@@ -14,6 +14,7 @@ interface OcmApiService {
         @Query("distanceunit") distanceUnit: String = "Miles",
         @Query("maxresults") maxResults: Int = 200,
         @Query("compact") compact: Boolean = true,
-        @Query("verbose") verbose: Boolean = false
+        @Query("verbose") verbose: Boolean = false,
+        @Query("key") apiKey: String? = null
     ): List<OcmPoi>
 }
