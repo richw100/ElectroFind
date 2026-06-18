@@ -13,9 +13,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.richwatson.electrofind.ui.screens.BrowseMapScreen
+import com.richwatson.electrofind.ui.screens.ComparisonScreen
 import com.richwatson.electrofind.ui.screens.LoginScreen
 import com.richwatson.electrofind.ui.screens.ResultsScreen
 import com.richwatson.electrofind.ui.screens.SearchScreen
+import com.richwatson.electrofind.ui.screens.SettingsScreen
 import com.richwatson.electrofind.ui.theme.ElectroFindTheme
 import com.richwatson.electrofind.viewmodel.AuthViewModel
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
@@ -28,8 +30,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private val chargerViewModel: ChargerViewModel by lazy {
-        val repository = (application as ElectroFindApp).repository
-        ViewModelProvider(this, factory { ChargerViewModel(repository) })[ChargerViewModel::class.java]
+        val app = application as ElectroFindApp
+        ViewModelProvider(this, factory {
+            ChargerViewModel(app.repository, app.ocmRepository, app.appPreferences)
+        })[ChargerViewModel::class.java]
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,6 +65,9 @@ class MainActivity : ComponentActivity() {
                             },
                             onBrowseMap = {
                                 navController.navigate("browse_map")
+                            },
+                            onSettings = {
+                                navController.navigate("settings")
                             }
                         )
                     }
@@ -79,6 +86,19 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("results") {
                         ResultsScreen(
+                            chargerViewModel = chargerViewModel,
+                            onBack = { navController.popBackStack() },
+                            onCompare = { navController.navigate("comparison") }
+                        )
+                    }
+                    composable("settings") {
+                        SettingsScreen(
+                            chargerViewModel = chargerViewModel,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("comparison") {
+                        ComparisonScreen(
                             chargerViewModel = chargerViewModel,
                             onBack = { navController.popBackStack() }
                         )

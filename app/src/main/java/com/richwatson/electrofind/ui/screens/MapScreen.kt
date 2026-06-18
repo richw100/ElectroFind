@@ -227,7 +227,7 @@ fun ChargerMapView(
                     append(charger.operator.name)
                     append(if (charger.hasAvailableEvse) " · Available" else " · In use")
                 }
-                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale)
+                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, isOcm = charger.sourceDisplay == com.richwatson.electrofind.api.models.DataSource.OCM)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
                     dialogCharger = charger
@@ -313,13 +313,14 @@ fun ChargerMapView(
 @Composable
 private fun LocalContext() = androidx.compose.ui.platform.LocalContext.current
 
-private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false): Drawable {
+private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, isOcm: Boolean = false): Drawable {
     val dp = context.resources.displayMetrics.density
     val w = (68 * dp).toInt()
     val h = (32 * dp).toInt()
     val r = 8 * dp
 
     val bgColor = when {
+        isOcm -> android.graphics.Color.rgb(33, 150, 243)
         price == null -> android.graphics.Color.rgb(100, 100, 100)
         price == 0.0 -> android.graphics.Color.rgb(27, 94, 32)
         price < 0.35 -> android.graphics.Color.rgb(46, 125, 50)
@@ -341,6 +342,7 @@ private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolea
     }
     val staleTag = if (isStale) "!" else ""
     val label = when {
+        isOcm -> "OCM$staleTag"
         price == null -> "?$staleTag"
         price == 0.0 -> "FREE$staleTag"
         else -> "€%.2f$staleTag".format(price)

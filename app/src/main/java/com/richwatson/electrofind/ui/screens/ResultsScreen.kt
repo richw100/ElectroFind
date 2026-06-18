@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -22,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.DataSource
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import com.richwatson.electrofind.viewmodel.SortOrder
 import com.richwatson.electrofind.viewmodel.SpeedFilter
@@ -30,7 +32,8 @@ import com.richwatson.electrofind.viewmodel.SpeedFilter
 @Composable
 fun ResultsScreen(
     chargerViewModel: ChargerViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onCompare: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
     // remember(state) forces ResultsScreen to read `state` in its own scope, so when state
@@ -56,6 +59,11 @@ fun ResultsScreen(
                     }
                 },
                 actions = {
+                    if (state.dataSource == DataSource.BOTH && state.chargers.isNotEmpty() && state.ocmChargers.isNotEmpty()) {
+                        IconButton(onClick = onCompare) {
+                            Icon(Icons.AutoMirrored.Filled.CompareArrows, "Compare sources")
+                        }
+                    }
                     if (!showMap) {
                         IconButton(onClick = { showFilters = !showFilters }) {
                             Icon(Icons.Default.FilterList, "Filter / Sort")
@@ -149,8 +157,8 @@ fun ResultsScreen(
                         contentPadding = PaddingValues(12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(chargers, key = { it.pk }) { charger ->
-                            ChargerCard(charger)
+                        items(chargers, key = { "${it.sourceDisplay}_${it.pk}" }) { charger ->
+                            ChargerCard(charger = charger, showSourceBadge = state.dataSource == DataSource.BOTH)
                         }
                     }
                 }
@@ -202,7 +210,7 @@ private fun FilterBar(vm: ChargerViewModel) {
 }
 
 @Composable
-private fun ChargerCard(charger: ChargingLocation) {
+private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = false) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -214,11 +222,34 @@ private fun ChargerCard(charger: ChargingLocation) {
                 verticalAlignment = Alignment.Top
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        charger.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            charger.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (showSourceBadge) {
+                            val (badgeText, badgeColor) = when (charger.sourceDisplay) {
+                                DataSource.OCM -> "OCM" to Color(0xFF1565C0)
+                                else -> "EV" to Color(0xFF2E7D32)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .background(badgeColor.copy(alpha = 0.15f), shape = MaterialTheme.shapes.extraSmall)
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    badgeText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = badgeColor,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     Text(
                         charger.operator.name,
                         style = MaterialTheme.typography.bodySmall,
@@ -229,6 +260,14 @@ private fun ChargerCard(charger: ChargingLocation) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // Show OCM text pricing when no structured price
+                    if (charger.pricePerKwh == null && charger.pricingText != null) {
+                        Text(
+                            charger.pricingText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 // Price badge
                 PriceBadge(charger)
@@ -277,23 +316,25 @@ private fun ChargerCard(charger: ChargingLocation) {
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
-            charger.externalId?.let { extId ->
-                val context = LocalContext.current
-                TextButton(
-                    onClick = {
-                        val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=$extId")
-                        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                    },
-                    modifier = Modifier.align(Alignment.End),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("View on Electroverse", style = MaterialTheme.typography.labelSmall)
+            if (charger.sourceDisplay == DataSource.ELECTROVERSE) {
+                charger.externalId?.let { extId ->
+                    val context = LocalContext.current
+                    TextButton(
+                        onClick = {
+                            val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=$extId")
+                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        },
+                        modifier = Modifier.align(Alignment.End),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("View on Electroverse", style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }

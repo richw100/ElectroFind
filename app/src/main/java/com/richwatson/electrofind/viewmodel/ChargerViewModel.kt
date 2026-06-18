@@ -4,8 +4,11 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.DataSource
 import com.richwatson.electrofind.api.models.LocationSuggestion
+import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.ChargerRepository
+import com.richwatson.electrofind.repository.OcmRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,8 +25,10 @@ enum class SortOrder { PRICE_ASC, PRICE_DESC, SPEED_DESC }
 enum class SpeedFilter { ALL, FAST, RAPID, ULTRA }
 
 data class SearchState(
-    val isLoading: Boolean = false,
+    val isLoadingEv: Boolean = false,
+    val isLoadingOcm: Boolean = false,
     val chargers: List<ChargingLocation> = emptyList(),
+    val ocmChargers: List<ChargingLocation> = emptyList(),
     val error: String? = null,
     val searchQuery: String = "",
     val searchLat: Double = 0.0,
@@ -32,10 +37,17 @@ data class SearchState(
     val speedFilter: SpeedFilter = SpeedFilter.ALL,
     val connectorFilter: String = "ALL",
     val loadingStatus: String = "",
-    val fetchProgress: Float = 0f
-)
+    val fetchProgress: Float = 0f,
+    val dataSource: DataSource = DataSource.ELECTROVERSE
+) {
+    val isLoading: Boolean get() = isLoadingEv || isLoadingOcm
+}
 
-class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() {
+class ChargerViewModel(
+    private val repository: ChargerRepository,
+    private val ocmRepository: OcmRepository,
+    private val appPreferences: AppPreferences
+) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchState())
     val state: StateFlow<SearchState> = _state.asStateFlow()
@@ -49,10 +61,19 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
     private var searchJob: Job? = null
     private var suggestionsJob: Job? = null
 
+    init {
+        _state.update { it.copy(dataSource = appPreferences.dataSource) }
+    }
+
     val filteredSortedChargers: List<ChargingLocation>
         get() {
             val s = _state.value
-            var list = s.chargers
+            val allChargers = when (s.dataSource) {
+                DataSource.ELECTROVERSE -> s.chargers
+                DataSource.OCM -> s.ocmChargers
+                DataSource.BOTH -> s.chargers + s.ocmChargers
+            }
+            var list = allChargers
             Log.d("ChargerViewModel", "filteredSortedChargers: total=${list.size} speed=${s.speedFilter} connector=${s.connectorFilter} sort=${s.sortOrder}")
 
             list = when (s.speedFilter) {
@@ -69,7 +90,7 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
                 }
                 Log.d("ChargerViewModel", "filteredSortedChargers: after connector filter=${list.size}")
                 if (list.isEmpty()) {
-                    Log.w("ChargerViewModel", "connector filter '${s.connectorFilter}' removed all results. Sample types: ${s.chargers.take(3).map { it.connectorTypes }}")
+                    Log.w("ChargerViewModel", "connector filter '${s.connectorFilter}' removed all results. Sample types: ${allChargers.take(3).map { it.connectorTypes }}")
                 }
             }
 
@@ -85,16 +106,19 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
     fun searchByPlaceName(name: String, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
         if (name.isBlank()) return
         searchJob?.cancel()
-        _state.update { it.copy(isLoading = true, error = null, searchQuery = name, chargers = emptyList()) }
+        _state.update { it.copy(isLoadingEv = true, error = null, searchQuery = name, chargers = emptyList(), ocmChargers = emptyList()) }
         searchJob = viewModelScope.launch {
             val coords = repository.geocode(name)
             if (coords == null) {
-                _state.update { it.copy(isLoading = false, error = "Location not found: $name") }
+                _state.update { it.copy(isLoadingEv = false, error = "Location not found: $name") }
                 return@launch
             }
             _state.update { it.copy(searchLat = coords.first, searchLng = coords.second) }
             _navigateToResults.tryEmit(Unit)
             doSearch(coords.first, coords.second, socketGroups)
+            if (_state.value.dataSource != DataSource.ELECTROVERSE) {
+                doOcmSearch(coords.first, coords.second)
+            }
         }
     }
 
@@ -112,15 +136,21 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
 
     fun searchByCoordinates(lat: Double, lng: Double, label: String? = null, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
         searchJob?.cancel()
-        _state.update { it.copy(
-            isLoading = true, error = null,
-            searchQuery = label ?: "%.4f, %.4f".format(lat, lng),
-            searchLat = lat, searchLng = lng,
-            chargers = emptyList()
-        ) }
+        _state.update {
+            it.copy(
+                isLoadingEv = true, error = null,
+                searchQuery = label ?: "%.4f, %.4f".format(lat, lng),
+                searchLat = lat, searchLng = lng,
+                chargers = emptyList(),
+                ocmChargers = emptyList()
+            )
+        }
         _navigateToResults.tryEmit(Unit)
         searchJob = viewModelScope.launch {
             doSearch(lat, lng, socketGroups)
+            if (_state.value.dataSource != DataSource.ELECTROVERSE) {
+                doOcmSearch(lat, lng)
+            }
         }
     }
 
@@ -136,13 +166,13 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
         )
             .catch { e ->
                 Log.e("ChargerViewModel", "catch: ${e.message}")
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Search failed") }
+                _state.update { it.copy(isLoadingEv = false, error = e.message ?: "Search failed") }
             }
             .onCompletion {
                 Log.d("ChargerViewModel", "onCompletion: chargers=${_state.value.chargers.size} lastStatus=$lastStatus")
                 _state.update { s ->
                     s.copy(
-                        isLoading = false,
+                        isLoadingEv = false,
                         fetchProgress = 0f,
                         loadingStatus = if (s.chargers.isNotEmpty()) "" else lastStatus,
                         error = if (s.chargers.isEmpty() && s.error == null) "No chargers found within 3 miles" else s.error
@@ -163,6 +193,23 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
             }
     }
 
+    private fun doOcmSearch(lat: Double, lng: Double) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingOcm = true) }
+            try {
+                val results = ocmRepository.searchNearby(lat, lng)
+                _state.update { it.copy(isLoadingOcm = false, ocmChargers = results) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoadingOcm = false) }
+            }
+        }
+    }
+
+    fun setDataSource(source: DataSource) {
+        appPreferences.dataSource = source
+        _state.update { it.copy(dataSource = source) }
+    }
+
     fun setSortOrder(order: SortOrder) {
         _state.update { it.copy(sortOrder = order) }
     }
@@ -177,6 +224,6 @@ class ChargerViewModel(private val repository: ChargerRepository) : ViewModel() 
 
     fun clearResults() {
         searchJob?.cancel()
-        _state.update { it.copy(chargers = emptyList(), error = null, isLoading = false) }
+        _state.update { it.copy(chargers = emptyList(), ocmChargers = emptyList(), error = null, isLoadingEv = false, isLoadingOcm = false) }
     }
 }

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,7 +35,8 @@ import kotlinx.coroutines.delay
 fun SearchScreen(
     chargerViewModel: ChargerViewModel,
     onResultsReady: () -> Unit,
-    onBrowseMap: () -> Unit = {}
+    onBrowseMap: () -> Unit = {},
+    onSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -83,7 +85,16 @@ fun SearchScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("ElectroFind") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text("ElectroFind") },
+                actions = {
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                }
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
