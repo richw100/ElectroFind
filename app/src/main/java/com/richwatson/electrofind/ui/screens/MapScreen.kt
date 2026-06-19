@@ -72,6 +72,7 @@ fun BrowseMapScreen(
     onLocationSelected: (Double, Double) -> Unit,
     onBack: () -> Unit
 ) {
+    val state by chargerViewModel.state.collectAsState()
     val suggestions by chargerViewModel.suggestions.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     var searchText by remember { mutableStateOf("") }
@@ -116,6 +117,7 @@ fun BrowseMapScreen(
                 searchLng = initialLng,
                 initialZoom = 8.0,
                 centerOn = pendingCenter,
+                radiusMiles = state.searchRadiusMiles,
                 modifier = Modifier.fillMaxSize(),
                 onLocationSelected = onLocationSelected
             )
