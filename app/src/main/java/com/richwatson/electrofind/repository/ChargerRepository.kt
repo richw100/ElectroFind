@@ -24,8 +24,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import com.google.gson.annotations.SerializedName
@@ -111,90 +111,40 @@ class ChargerRepository(
         lat: Double,
         lng: Double,
         zoom: Int = 12,
-        gridRadius: Int = 1,
         socketGroups: List<String> = defaultSocketGroups,
+        radiusMiles: Int = 3,
         onStatus: (status: String, progress: Float) -> Unit = { _, _ -> }
     ): Flow<ChargingLocation> = channelFlow {
-        onStatus("Fetching tile data…", 0f)
+        val now = System.currentTimeMillis()
         val centre = TileCalculator.latLngToTile(lat, lng, zoom)
+        // Each zoom-12 tile is ~6 km wide at UK latitudes; expand grid to cover the full radius
+        val gridRadius = maxOf(1, kotlin.math.ceil(radiusMiles * 1609.344 / 6000.0).toInt())
         val tiles = TileCalculator.surroundingTiles(centre, gridRadius)
 
-        val pks = coroutineScope {
-            tiles.map { tile ->
-                async(Dispatchers.IO) { fetchTilePks(tile.zoom, tile.x, tile.y, socketGroups) }
-            }.awaitAll()
-        }.flatten().distinct()
+        onStatus("Searching ${tiles.size} tiles…", 0f)
 
-        // --- Cache-first: classify each pk ---
-        val now = System.currentTimeMillis()
-        val cached = dao.getByPks(pks).associateBy { it.pk }
+        // PKs queued for API fetch. Workers drain this as tiles produce PKs.
+        val pkChannel = Channel<Long>(Channel.UNLIMITED)
+        val seenPks = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
-        val missingPks = mutableListOf<Long>()
-        val stalePks = mutableListOf<Long>()
-        var cachedEmitted = 0
-
-        for (pk in pks) {
-            val entity = cached[pk]
-            when {
-                entity == null -> missingPks.add(pk)
-                now - entity.cachedAt > STALE_MS -> {
-                    stalePks.add(pk)
-                    // Emit stale version immediately so the user sees something while it refreshes
-                    val charger = gson.fromJson(entity.json, ChargingLocation::class.java)
-                        .copy(cachedAt = entity.cachedAt)
-                    val clat = charger.coordinates.latitude
-                    val clng = charger.coordinates.longitude
-                    if ((clat != 0.0 || clng != 0.0) && distanceMiles(lat, lng, clat, clng) <= 3.0) {
-                        send(charger)
-                        cachedEmitted++
-                    }
-                }
-                else -> {
-                    // Fresh cache hit — no API call needed
-                    val charger = gson.fromJson(entity.json, ChargingLocation::class.java)
-                        .copy(cachedAt = entity.cachedAt)
-                    val clat = charger.coordinates.latitude
-                    val clng = charger.coordinates.longitude
-                    if ((clat != 0.0 || clng != 0.0) && distanceMiles(lat, lng, clat, clng) <= 3.0) {
-                        send(charger)
-                        cachedEmitted++
-                    }
-                }
-            }
-        }
-
-        val toFetch = missingPks + stalePks
-        val stalePkSet = stalePks.toHashSet()
-        val total = toFetch.size
+        val totalQueued = AtomicInteger(0)
         val done = AtomicInteger(0)
-        val nullCount = AtomicInteger(0)
-        val noCoordCount = AtomicInteger(0)
-        val tooFarCount = AtomicInteger(0)
         val sentCount = AtomicInteger(0)
+        val cachedCount = AtomicInteger(0)
 
-        if (total > 0) {
-            val statusPrefix = if (cachedEmitted > 0) "$cachedEmitted from cache, " else ""
-            onStatus("${statusPrefix}checking $total locations via API…", 0f)
-
-            // Missing PKs: high concurrency. Stale PKs: throttled (background refresh).
-            val semMissing = Semaphore(10)
-            val semStale = Semaphore(3)
-
-            coroutineScope {
-                toFetch.map { pk ->
-                    async(Dispatchers.IO) {
-                        val sem = if (pk in stalePkSet) semStale else semMissing
-                        val t0 = System.currentTimeMillis()
+        coroutineScope {
+            // 10 workers start immediately — they pick up PKs as tiles feed them in
+            val workers = List(10) {
+                launch(Dispatchers.IO) {
+                    for (pk in pkChannel) {
                         try {
-                            val charger = sem.withPermit {
-                                withTimeout(8_000L) { fetchChargingLocation(pk.toString()) }
-                            }
+                            val charger = withTimeout(8_000L) { fetchChargingLocation(pk.toString()) }
                             val n = done.incrementAndGet()
-                            if (n == 1 || n % 5 == 0 || n == total) {
-                                onStatus("Checked $n/$total locations", n.toFloat() / total)
+                            val t = totalQueued.get()
+                            if (n == 1 || n % 5 == 0) {
+                                onStatus("${sentCount.get()} found, checking $n/$t…", if (t > 0) n.toFloat() / t else 0f)
                             }
-                            if (charger == null) { nullCount.incrementAndGet(); return@async }
-                            // Persist fresh data to cache
+                            if (charger == null) continue
                             dao.upsert(CachedChargerEntity(
                                 pk = charger.pk,
                                 lat = charger.coordinates.latitude,
@@ -204,38 +154,82 @@ class ChargerRepository(
                             ))
                             val clat = charger.coordinates.latitude
                             val clng = charger.coordinates.longitude
-                            if (clat == 0.0 && clng == 0.0) { noCoordCount.incrementAndGet(); return@async }
-                            val dist = distanceMiles(lat, lng, clat, clng)
-                            if (dist > 3.0) { tooFarCount.incrementAndGet(); return@async }
+                            if (clat == 0.0 && clng == 0.0) continue
+                            if (distanceMiles(lat, lng, clat, clng) > radiusMiles) continue
                             sentCount.incrementAndGet()
-                            // Emit with cachedAt = now so isStale = false, replacing any stale version
                             send(charger.copy(cachedAt = now))
                         } catch (e: TimeoutCancellationException) {
-                            nullCount.incrementAndGet()
-                            val n = done.incrementAndGet()
-                            if (n == 1 || n % 5 == 0 || n == total) {
-                                onStatus("Checked $n/$total locations", n.toFloat() / total)
-                            }
+                            done.incrementAndGet()
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            Log.e(TAG, "pk=$pk failed after ${System.currentTimeMillis() - t0}ms", e)
-                            nullCount.incrementAndGet()
-                            val n = done.incrementAndGet()
-                            if (n == 1 || n % 5 == 0 || n == total) {
-                                onStatus("Checked $n/$total locations", n.toFloat() / total)
-                            }
+                            done.incrementAndGet()
+                            Log.e(TAG, "pk=$pk failed", e)
                         }
                     }
-                }.awaitAll()
+                }
             }
-        } else {
-            onStatus("All $cachedEmitted results loaded from cache", 0f)
+
+            // Tile producer — fetch tiles in parallel; for each tile emit cache hits immediately
+            // and queue missing PKs so workers can start fetching without waiting for all tiles
+            launch(Dispatchers.IO) {
+                try {
+                    coroutineScope {
+                        tiles.map { tile ->
+                            async(Dispatchers.IO) {
+                                val pks = fetchTilePks(tile.zoom, tile.x, tile.y, socketGroups)
+                                val newPks = pks.filter { seenPks.add(it) }
+                                if (newPks.isEmpty()) return@async
+
+                                val cachedEntities = dao.getByPks(newPks).associateBy { it.pk }
+
+                                for (pk in newPks) {
+                                    val entity = cachedEntities[pk]
+                                    when {
+                                        entity == null -> {
+                                            // No cache — queue for API fetch
+                                            totalQueued.incrementAndGet()
+                                            pkChannel.send(pk)
+                                        }
+                                        now - entity.cachedAt > STALE_MS -> {
+                                            // Stale — show old version now, refresh in background
+                                            val charger = gson.fromJson(entity.json, ChargingLocation::class.java)
+                                                .copy(cachedAt = entity.cachedAt)
+                                            val clat = charger.coordinates.latitude
+                                            val clng = charger.coordinates.longitude
+                                            if ((clat != 0.0 || clng != 0.0) && distanceMiles(lat, lng, clat, clng) <= radiusMiles) {
+                                                send(charger)
+                                                cachedCount.incrementAndGet()
+                                            }
+                                            totalQueued.incrementAndGet()
+                                            pkChannel.send(pk)
+                                        }
+                                        else -> {
+                                            // Fresh cache — emit immediately, no API call needed
+                                            val charger = gson.fromJson(entity.json, ChargingLocation::class.java)
+                                                .copy(cachedAt = entity.cachedAt)
+                                            val clat = charger.coordinates.latitude
+                                            val clng = charger.coordinates.longitude
+                                            if ((clat != 0.0 || clng != 0.0) && distanceMiles(lat, lng, clat, clng) <= radiusMiles) {
+                                                send(charger)
+                                                cachedCount.incrementAndGet()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                } finally {
+                    pkChannel.close()
+                }
+            }
+
+            workers.forEach { it.join() }
         }
 
-        val summary = "Search (%.4f, %.4f) | API: $total | new: ${sentCount.get()} | cached: $cachedEmitted | too far: ${tooFarCount.get()} | failed: ${nullCount.get()}".format(lat, lng)
-        Log.d(TAG, "SUMMARY: $summary")
-        onStatus(summary, 1f)
+        Log.d(TAG, "SUMMARY lat=$lat lng=$lng | sent=${sentCount.get()} cached=${cachedCount.get()} total_api=${done.get()}")
+        onStatus("", 0f)
     }
 
     private suspend fun fetchTilePks(

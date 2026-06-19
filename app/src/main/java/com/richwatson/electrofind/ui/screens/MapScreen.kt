@@ -61,6 +61,7 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polygon
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -183,6 +184,7 @@ fun ChargerMapView(
     searchLng: Double,
     initialZoom: Double = 14.0,
     centerOn: GeoPoint? = null,
+    radiusMiles: Int = 0,
     modifier: Modifier = Modifier,
     onLocationSelected: ((Double, Double) -> Unit)? = null
 ) {
@@ -206,8 +208,19 @@ fun ChargerMapView(
         }
     }
 
-    LaunchedEffect(chargers) {
+    LaunchedEffect(chargers, radiusMiles) {
         mapView.overlays.clear()
+
+        if (radiusMiles > 0 && (searchLat != 0.0 || searchLng != 0.0)) {
+            val radiusMetres = radiusMiles * 1609.344
+            val circle = Polygon(mapView).apply {
+                points = Polygon.pointsAsCircle(GeoPoint(searchLat, searchLng), radiusMetres)
+                fillPaint.color = android.graphics.Color.argb(25, 33, 150, 243)
+                outlinePaint.color = android.graphics.Color.argb(180, 33, 150, 243)
+                outlinePaint.strokeWidth = 3f
+            }
+            mapView.overlays.add(circle)
+        }
 
         if (searchLat != 0.0 || searchLng != 0.0) {
             val centreMarker = Marker(mapView).apply {

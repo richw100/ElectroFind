@@ -23,10 +23,10 @@ class OcmApiKeyMissingException : Exception("No OCM API key set — add one in S
 class OcmRepository(private val service: OcmApiService, private val dao: OcmDao) {
     private val gson = Gson()
 
-    suspend fun searchNearby(lat: Double, lng: Double, apiKey: String): List<ChargingLocation> {
+    suspend fun searchNearby(lat: Double, lng: Double, apiKey: String, radiusMiles: Int = 3): List<ChargingLocation> {
         if (apiKey.isBlank()) throw OcmApiKeyMissingException()
         return try {
-            val pois = service.getNearby(latitude = lat, longitude = lng, apiKey = apiKey)
+            val pois = service.getNearby(latitude = lat, longitude = lng, distance = radiusMiles, apiKey = apiKey)
             pois.forEach { poi ->
                 dao.upsert(
                     CachedOcmEntity(

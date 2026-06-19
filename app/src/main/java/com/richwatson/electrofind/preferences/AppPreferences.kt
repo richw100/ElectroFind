@@ -19,4 +19,8 @@ class AppPreferences(context: Context) {
     var ocmApiKey: String
         get() = prefs.getString("ocm_api_key", "") ?: ""
         set(value) { prefs.edit().putString("ocm_api_key", value.trim()).apply() }
+
+    var searchRadiusMiles: Int
+        get() = prefs.getInt("search_radius_miles", 3)
+        set(value) { prefs.edit().putInt("search_radius_miles", value).apply() }
 }

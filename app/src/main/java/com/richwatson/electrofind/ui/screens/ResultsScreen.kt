@@ -52,7 +52,7 @@ fun ResultsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("${chargers.size} chargers within 3 miles of ${state.searchQuery}") },
+                title = { Text("${chargers.size} chargers within ${state.searchRadiusMiles} miles of ${state.searchQuery}") },
                 navigationIcon = {
                     IconButton(onClick = goBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -85,6 +85,7 @@ fun ResultsScreen(
                     chargers = chargers,
                     searchLat = state.searchLat,
                     searchLng = state.searchLng,
+                    radiusMiles = state.searchRadiusMiles,
                     modifier = Modifier.padding(padding).fillMaxSize(),
                     onLocationSelected = { lat, lng ->
                         chargerViewModel.searchByCoordinates(lat, lng)

@@ -89,6 +89,19 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            Text("Search radius", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1, 3, 5, 10).forEach { miles ->
+                    FilterChip(
+                        selected = state.searchRadiusMiles == miles,
+                        onClick = { chargerViewModel.setSearchRadius(miles) },
+                        label = { Text("$miles mi") }
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
             Text("Open Charge Map API key", style = MaterialTheme.typography.titleMedium)
             Text(
                 "Required for OCM searches. Register free at openchargemap.org",

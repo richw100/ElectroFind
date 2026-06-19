@@ -39,7 +39,8 @@ data class SearchState(
     val connectorFilter: String = "ALL",
     val loadingStatus: String = "",
     val fetchProgress: Float = 0f,
-    val dataSource: DataSource = DataSource.ELECTROVERSE
+    val dataSource: DataSource = DataSource.ELECTROVERSE,
+    val searchRadiusMiles: Int = 3
 ) {
     val isLoading: Boolean get() = isLoadingEv || isLoadingOcm
 }
@@ -63,7 +64,7 @@ class ChargerViewModel(
     private var suggestionsJob: Job? = null
 
     init {
-        _state.update { it.copy(dataSource = appPreferences.dataSource) }
+        _state.update { it.copy(dataSource = appPreferences.dataSource, searchRadiusMiles = appPreferences.searchRadiusMiles) }
     }
 
     val filteredSortedChargers: List<ChargingLocation>
@@ -116,9 +117,10 @@ class ChargerViewModel(
             }
             _state.update { it.copy(searchLat = coords.first, searchLng = coords.second) }
             _navigateToResults.tryEmit(Unit)
-            doSearch(coords.first, coords.second, socketGroups)
+            val radius = _state.value.searchRadiusMiles
+            doSearch(coords.first, coords.second, socketGroups, radius)
             if (_state.value.dataSource != DataSource.ELECTROVERSE) {
-                doOcmSearch(coords.first, coords.second)
+                doOcmSearch(coords.first, coords.second, radius)
             }
         }
     }
@@ -148,17 +150,18 @@ class ChargerViewModel(
         }
         _navigateToResults.tryEmit(Unit)
         searchJob = viewModelScope.launch {
-            doSearch(lat, lng, socketGroups)
+            val radius = _state.value.searchRadiusMiles
+            doSearch(lat, lng, socketGroups, radius)
             if (_state.value.dataSource != DataSource.ELECTROVERSE) {
-                doOcmSearch(lat, lng)
+                doOcmSearch(lat, lng, radius)
             }
         }
     }
 
-    private suspend fun doSearch(lat: Double, lng: Double, socketGroups: List<String>) {
+    private suspend fun doSearch(lat: Double, lng: Double, socketGroups: List<String>, radiusMiles: Int) {
         var lastStatus = ""
         repository.searchChargers(
-            lat, lng, socketGroups = socketGroups,
+            lat, lng, socketGroups = socketGroups, radiusMiles = radiusMiles,
             onStatus = { status, progress ->
                 Log.d("ChargerViewModel", "onStatus: progress=$progress status=$status")
                 lastStatus = status
@@ -176,7 +179,7 @@ class ChargerViewModel(
                         isLoadingEv = false,
                         fetchProgress = 0f,
                         loadingStatus = if (s.chargers.isNotEmpty()) "" else lastStatus,
-                        error = if (s.chargers.isEmpty() && s.error == null) "No chargers found within 3 miles" else s.error
+                        error = if (s.chargers.isEmpty() && s.error == null) "No chargers found within ${s.searchRadiusMiles} miles" else s.error
                     )
                 }
                 Log.d("ChargerViewModel", "onCompletion: state updated, loadingStatus=${_state.value.loadingStatus}")
@@ -194,11 +197,11 @@ class ChargerViewModel(
             }
     }
 
-    private fun doOcmSearch(lat: Double, lng: Double) {
+    private fun doOcmSearch(lat: Double, lng: Double, radiusMiles: Int) {
         viewModelScope.launch {
             _state.update { it.copy(isLoadingOcm = true) }
             try {
-                val results = ocmRepository.searchNearby(lat, lng, appPreferences.ocmApiKey)
+                val results = ocmRepository.searchNearby(lat, lng, appPreferences.ocmApiKey, radiusMiles)
                 _state.update { it.copy(isLoadingOcm = false, ocmChargers = results) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoadingOcm = false, ocmError = e.message ?: "OCM search failed") }
@@ -209,6 +212,11 @@ class ChargerViewModel(
     fun setDataSource(source: DataSource) {
         appPreferences.dataSource = source
         _state.update { it.copy(dataSource = source) }
+    }
+
+    fun setSearchRadius(miles: Int) {
+        appPreferences.searchRadiusMiles = miles
+        _state.update { it.copy(searchRadiusMiles = miles) }
     }
 
     fun setSortOrder(order: SortOrder) {
