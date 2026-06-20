@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 
 enum class SortOrder { PRICE_ASC, PRICE_DESC, SPEED_DESC }
 enum class SpeedFilter { ALL, FAST, RAPID, ULTRA }
+enum class ThemeMode { LIGHT, DARK, SYSTEM }
 
 data class SearchState(
     val isLoadingEv: Boolean = false,
@@ -40,7 +41,11 @@ data class SearchState(
     val loadingStatus: String = "",
     val fetchProgress: Float = 0f,
     val dataSource: DataSource = DataSource.ELECTROVERSE,
-    val searchRadiusMiles: Int = 3
+    val searchRadiusMiles: Int = 3,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val savedMapZoom: Double = 14.0,
+    val savedMapCenterLat: Double = 0.0,
+    val savedMapCenterLng: Double = 0.0
 ) {
     val isLoading: Boolean get() = isLoadingEv || isLoadingOcm
 }
@@ -64,7 +69,7 @@ class ChargerViewModel(
     private var suggestionsJob: Job? = null
 
     init {
-        _state.update { it.copy(dataSource = appPreferences.dataSource, searchRadiusMiles = appPreferences.searchRadiusMiles) }
+        _state.update { it.copy(dataSource = appPreferences.dataSource, searchRadiusMiles = appPreferences.searchRadiusMiles, themeMode = appPreferences.themeMode) }
     }
 
     val filteredSortedChargers: List<ChargingLocation>
@@ -217,6 +222,15 @@ class ChargerViewModel(
     fun setSearchRadius(miles: Int) {
         appPreferences.searchRadiusMiles = miles
         _state.update { it.copy(searchRadiusMiles = miles) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        appPreferences.themeMode = mode
+        _state.update { it.copy(themeMode = mode) }
+    }
+
+    fun saveMapPosition(zoom: Double, lat: Double, lng: Double) {
+        _state.update { it.copy(savedMapZoom = zoom, savedMapCenterLat = lat, savedMapCenterLng = lng) }
     }
 
     fun setSortOrder(order: SortOrder) {

@@ -9,10 +9,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,7 +33,8 @@ import com.richwatson.electrofind.viewmodel.SpeedFilter
 fun ResultsScreen(
     chargerViewModel: ChargerViewModel,
     onBack: () -> Unit,
-    onCompare: () -> Unit = {}
+    onCompare: () -> Unit = {},
+    onViewMap: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
     // remember(state) forces ResultsScreen to read `state` in its own scope, so when state
@@ -41,7 +42,6 @@ fun ResultsScreen(
     // is recomputed — without this, only nested Scaffold lambdas recompose and chargers stays stale
     val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
     var showFilters by remember { mutableStateOf(false) }
-    var showMap by remember { mutableStateOf(false) }
 
     val goBack = {
         chargerViewModel.clearResults()
@@ -64,40 +64,17 @@ fun ResultsScreen(
                             Icon(Icons.AutoMirrored.Filled.CompareArrows, "Compare sources")
                         }
                     }
-                    if (!showMap) {
-                        IconButton(onClick = { showFilters = !showFilters }) {
-                            Icon(Icons.Default.FilterList, "Filter / Sort")
-                        }
+                    IconButton(onClick = { showFilters = !showFilters }) {
+                        Icon(Icons.Default.FilterList, "Filter / Sort")
                     }
-                    IconButton(onClick = { showMap = !showMap; showFilters = false }) {
-                        Icon(
-                            if (showMap) Icons.AutoMirrored.Filled.ViewList else Icons.Default.Map,
-                            contentDescription = if (showMap) "List view" else "Map view"
-                        )
+                    IconButton(onClick = onViewMap) {
+                        Icon(Icons.Default.Map, contentDescription = "View map")
                     }
                 }
             )
         }
     ) { padding ->
-        if (showMap) {
-            if (state.searchLat != 0.0 || state.searchLng != 0.0) {
-                ChargerMapView(
-                    chargers = chargers,
-                    searchLat = state.searchLat,
-                    searchLng = state.searchLng,
-                    radiusMiles = state.searchRadiusMiles,
-                    modifier = Modifier.padding(padding).fillMaxSize(),
-                    onLocationSelected = { lat, lng ->
-                        chargerViewModel.searchByCoordinates(lat, lng)
-                    }
-                )
-            } else {
-                Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Map unavailable — search coordinates not set.")
-                }
-            }
-        } else {
-            Column(Modifier.padding(padding).fillMaxSize()) {
+        Column(Modifier.padding(padding).fillMaxSize()) {
                 if (state.isLoading) {
                     if (state.fetchProgress > 0f) {
                         LinearProgressIndicator(
@@ -173,7 +150,6 @@ fun ResultsScreen(
                         }
                     }
                 }
-            }
         }
     }
 }
@@ -327,24 +303,34 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
-            if (charger.sourceDisplay == DataSource.ELECTROVERSE) {
-                charger.externalId?.let { extId ->
-                    val context = LocalContext.current
-                    TextButton(
-                        onClick = {
-                            val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=$extId")
-                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                        },
-                        modifier = Modifier.align(Alignment.End),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("View on Electroverse", style = MaterialTheme.typography.labelSmall)
+            val context = LocalContext.current
+            Row(modifier = Modifier.align(Alignment.End)) {
+                val lat = charger.coordinates.latitude
+                val lng = charger.coordinates.longitude
+                TextButton(
+                    onClick = {
+                        val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
+                        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Google Maps", style = MaterialTheme.typography.labelSmall)
+                }
+                if (charger.sourceDisplay == DataSource.ELECTROVERSE) {
+                    charger.externalId?.let { extId ->
+                        TextButton(
+                            onClick = {
+                                val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=$extId")
+                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Electroverse", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }

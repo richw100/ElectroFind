@@ -6,6 +6,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,13 +16,15 @@ import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.DataSource
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
+import com.richwatson.electrofind.viewmodel.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     chargerViewModel: ChargerViewModel,
     appPreferences: AppPreferences,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onAbout: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
     var ocmKeyInput by remember { mutableStateOf(appPreferences.ocmApiKey) }
@@ -89,6 +92,19 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            Text("Theme", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark", ThemeMode.SYSTEM to "Auto").forEach { (mode, label) ->
+                    FilterChip(
+                        selected = state.themeMode == mode,
+                        onClick = { chargerViewModel.setThemeMode(mode) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
             Text("Search radius", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(1, 3, 5, 10).forEach { miles ->
@@ -124,6 +140,21 @@ fun SettingsScreen(
                 modifier = Modifier.align(Alignment.End)
             ) {
                 Text("Save key")
+            }
+
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onAbout() }
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("About ElectroFind", style = MaterialTheme.typography.bodyLarge)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

@@ -1,5 +1,7 @@
 package com.richwatson.electrofind.ui.screens
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -8,6 +10,8 @@ import android.graphics.Paint
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,11 +30,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +61,9 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import kotlinx.coroutines.delay
@@ -179,19 +190,74 @@ fun BrowseMapScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ResultsMapScreen(
+    chargerViewModel: ChargerViewModel,
+    onBack: () -> Unit
+) {
+    val state by chargerViewModel.state.collectAsState()
+    val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
+
+    val initialCenter = if (state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0)
+        GeoPoint(state.savedMapCenterLat, state.savedMapCenterLng)
+    else if (state.searchLat != 0.0 || state.searchLng != 0.0)
+        GeoPoint(state.searchLat, state.searchLng)
+    else null
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Map · ${chargers.size} chargers") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        if (initialCenter != null) {
+            ChargerMapView(
+                chargers = chargers,
+                searchLat = state.searchLat,
+                searchLng = state.searchLng,
+                initialZoom = state.savedMapZoom,
+                initialCenter = initialCenter,
+                radiusMiles = state.searchRadiusMiles,
+                modifier = Modifier.padding(padding).fillMaxSize(),
+                onMapPositionSaved = { zoom, lat, lng ->
+                    chargerViewModel.saveMapPosition(zoom, lat, lng)
+                },
+                onLocationSelected = { lat, lng ->
+                    chargerViewModel.searchByCoordinates(lat, lng)
+                    onBack()
+                }
+            )
+        } else {
+            Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Map unavailable — search coordinates not set.")
+            }
+        }
+    }
+}
+
 @Composable
 fun ChargerMapView(
     chargers: List<ChargingLocation>,
     searchLat: Double,
     searchLng: Double,
     initialZoom: Double = 14.0,
+    initialCenter: GeoPoint? = null,
     centerOn: GeoPoint? = null,
     radiusMiles: Int = 0,
     modifier: Modifier = Modifier,
+    onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onLocationSelected: ((Double, Double) -> Unit)? = null
 ) {
     val context = LocalContext()
     var dialogCharger by remember { mutableStateOf<ChargingLocation?>(null) }
+    var myLocationPoint by remember { mutableStateOf<GeoPoint?>(null) }
 
     val mapView = remember {
         org.osmdroid.views.MapView(context).apply {
@@ -199,7 +265,7 @@ fun ChargerMapView(
             setMultiTouchControls(true)
             isTilesScaledToDpi = true
             controller.setZoom(initialZoom)
-            controller.setCenter(GeoPoint(searchLat, searchLng))
+            controller.setCenter(initialCenter ?: GeoPoint(searchLat, searchLng))
         }
     }
 
@@ -210,7 +276,7 @@ fun ChargerMapView(
         }
     }
 
-    LaunchedEffect(chargers, radiusMiles) {
+    LaunchedEffect(chargers, radiusMiles, myLocationPoint) {
         mapView.overlays.clear()
 
         if (radiusMiles > 0 && (searchLat != 0.0 || searchLng != 0.0)) {
@@ -231,6 +297,16 @@ fun ChargerMapView(
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
             }
             mapView.overlays.add(centreMarker)
+        }
+
+        myLocationPoint?.let { myLoc ->
+            val myMarker = Marker(mapView).apply {
+                position = myLoc
+                title = "You are here"
+                icon = myLocationDrawable(context)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            }
+            mapView.overlays.add(myMarker)
         }
 
         chargers.forEach { charger ->
@@ -266,10 +342,43 @@ fun ChargerMapView(
 
     DisposableEffect(Unit) {
         mapView.onResume()
-        onDispose { mapView.onPause() }
+        onDispose {
+            val c = mapView.mapCenter
+            onMapPositionSaved(mapView.zoomLevelDouble, c.latitude, c.longitude)
+            mapView.onPause()
+        }
     }
 
-    AndroidView(factory = { mapView }, modifier = modifier)
+    val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
+    fun fetchAndShowLocation() {
+        goToMyLocation(fusedClient, mapView) { loc -> myLocationPoint = GeoPoint(loc.latitude, loc.longitude) }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) fetchAndShowLocation()
+    }
+
+    Box(modifier = modifier) {
+        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+        FloatingActionButton(
+            onClick = {
+                val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (hasPerm) fetchAndShowLocation()
+                else permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Icon(Icons.Default.MyLocation, contentDescription = "Go to my location")
+        }
+    }
 
     dialogCharger?.let { charger ->
         AlertDialog(
@@ -304,25 +413,80 @@ fun ChargerMapView(
                 }
             },
             confirmButton = {
-                if (charger.externalId != null) {
+                Row {
+                    val lat = charger.coordinates.latitude
+                    val lng = charger.coordinates.longitude
                     TextButton(onClick = {
-                        val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=${charger.externalId}")
+                        val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
                         context.startActivity(Intent(Intent.ACTION_VIEW, uri))
                         dialogCharger = null
                     }) {
-                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("View on Electroverse")
+                        Text("Maps")
                     }
-                } else {
-                    TextButton(onClick = { dialogCharger = null }) { Text("Close") }
+                    if (charger.externalId != null) {
+                        TextButton(onClick = {
+                            val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=${charger.externalId}")
+                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                            dialogCharger = null
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Electroverse")
+                        }
+                    }
                 }
             },
-            dismissButton = if (charger.externalId != null) {
-                { TextButton(onClick = { dialogCharger = null }) { Text("Close") } }
-            } else null
+            dismissButton = { TextButton(onClick = { dialogCharger = null }) { Text("Close") } }
         )
     }
+}
+
+@SuppressLint("MissingPermission")
+private fun goToMyLocation(
+    fusedClient: com.google.android.gms.location.FusedLocationProviderClient,
+    mapView: org.osmdroid.views.MapView,
+    onLocation: (android.location.Location) -> Unit = {}
+) {
+    val cts = CancellationTokenSource()
+    fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+        .addOnSuccessListener { loc ->
+            if (loc != null) {
+                mapView.controller.animateTo(GeoPoint(loc.latitude, loc.longitude))
+                mapView.controller.setZoom(15.0)
+                onLocation(loc)
+            }
+        }
+}
+
+private fun myLocationDrawable(context: Context): Drawable {
+    val dp = context.resources.displayMetrics.density
+    val size = (24 * dp).toInt()
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val cx = size / 2f
+    val cy = size / 2f
+
+    // Outer blue circle
+    val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(60, 33, 150, 243)
+    }
+    canvas.drawCircle(cx, cy, cx, outerPaint)
+
+    // White ring
+    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+    }
+    canvas.drawCircle(cx, cy, cx * 0.65f, ringPaint)
+
+    // Blue dot
+    val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(33, 150, 243)
+    }
+    canvas.drawCircle(cx, cy, cx * 0.45f, dotPaint)
+
+    return BitmapDrawable(context.resources, bitmap)
 }
 
 @Composable

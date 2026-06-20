@@ -2,6 +2,7 @@ package com.richwatson.electrofind.preferences
 
 import android.content.Context
 import com.richwatson.electrofind.api.models.DataSource
+import com.richwatson.electrofind.viewmodel.ThemeMode
 
 class AppPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
@@ -23,4 +24,12 @@ class AppPreferences(context: Context) {
     var searchRadiusMiles: Int
         get() = prefs.getInt("search_radius_miles", 3)
         set(value) { prefs.edit().putInt("search_radius_miles", value).apply() }
+
+    var themeMode: ThemeMode
+        get() = try {
+            ThemeMode.valueOf(prefs.getString("theme_mode", ThemeMode.SYSTEM.name)!!)
+        } catch (e: Exception) {
+            ThemeMode.SYSTEM
+        }
+        set(value) { prefs.edit().putString("theme_mode", value.name).apply() }
 }

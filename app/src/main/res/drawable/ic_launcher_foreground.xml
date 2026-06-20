@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Lightning bolt centred in the safe zone (18dp inset each side) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M62,20 L38,56 L52,56 L46,88 L70,52 L56,52 Z"/>
+</vector>

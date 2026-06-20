@@ -3,18 +3,20 @@ package com.richwatson.electrofind
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.richwatson.electrofind.ui.screens.AboutScreen
 import com.richwatson.electrofind.ui.screens.BrowseMapScreen
 import com.richwatson.electrofind.ui.screens.ComparisonScreen
 import com.richwatson.electrofind.ui.screens.LoginScreen
+import com.richwatson.electrofind.ui.screens.ResultsMapScreen
 import com.richwatson.electrofind.ui.screens.ResultsScreen
 import com.richwatson.electrofind.ui.screens.SearchScreen
 import com.richwatson.electrofind.ui.screens.SettingsScreen
@@ -38,9 +40,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        WindowCompat.setDecorFitsSystemWindows(window, true)
         setContent {
-            ElectroFindTheme {
+            val state by chargerViewModel.state.collectAsState()
+            ElectroFindTheme(themeMode = state.themeMode) {
                 val navController = rememberNavController()
                 val isLoggedIn by authViewModel.isLoggedIn.collectAsState()
 
@@ -88,15 +91,26 @@ class MainActivity : ComponentActivity() {
                         ResultsScreen(
                             chargerViewModel = chargerViewModel,
                             onBack = { navController.popBackStack() },
-                            onCompare = { navController.navigate("comparison") }
+                            onCompare = { navController.navigate("comparison") },
+                            onViewMap = { navController.navigate("results_map") { launchSingleTop = true } }
+                        )
+                    }
+                    composable("results_map") {
+                        ResultsMapScreen(
+                            chargerViewModel = chargerViewModel,
+                            onBack = { navController.popBackStack() }
                         )
                     }
                     composable("settings") {
                         SettingsScreen(
                             chargerViewModel = chargerViewModel,
                             appPreferences = (application as ElectroFindApp).appPreferences,
-                            onBack = { navController.popBackStack() }
+                            onBack = { navController.popBackStack() },
+                            onAbout = { navController.navigate("about") }
                         )
+                    }
+                    composable("about") {
+                        AboutScreen(onBack = { navController.popBackStack() })
                     }
                     composable("comparison") {
                         ComparisonScreen(
