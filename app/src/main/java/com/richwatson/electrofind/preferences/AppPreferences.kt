@@ -32,4 +32,16 @@ class AppPreferences(context: Context) {
             ThemeMode.SYSTEM
         }
         set(value) { prefs.edit().putString("theme_mode", value.name).apply() }
+
+    var mapZoom: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("map_zoom", java.lang.Double.doubleToLongBits(14.0)))
+        set(value) { prefs.edit().putLong("map_zoom", java.lang.Double.doubleToLongBits(value)).apply() }
+
+    var mapCenterLat: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("map_center_lat", java.lang.Double.doubleToLongBits(0.0)))
+        set(value) { prefs.edit().putLong("map_center_lat", java.lang.Double.doubleToLongBits(value)).apply() }
+
+    var mapCenterLng: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("map_center_lng", java.lang.Double.doubleToLongBits(0.0)))
+        set(value) { prefs.edit().putLong("map_center_lng", java.lang.Double.doubleToLongBits(value)).apply() }
 }

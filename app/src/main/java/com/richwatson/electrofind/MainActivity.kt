@@ -3,14 +3,29 @@ package com.richwatson.electrofind
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.richwatson.electrofind.ui.screens.AboutScreen
 import com.richwatson.electrofind.ui.screens.BrowseMapScreen
@@ -34,7 +49,7 @@ class MainActivity : ComponentActivity() {
     private val chargerViewModel: ChargerViewModel by lazy {
         val app = application as ElectroFindApp
         ViewModelProvider(this, factory {
-            ChargerViewModel(app.repository, app.ocmRepository, app.appPreferences)
+            ChargerViewModel(app.repository, app.ocmRepository, app.appPreferences, app)
         })[ChargerViewModel::class.java]
     }
 
@@ -46,77 +61,144 @@ class MainActivity : ComponentActivity() {
             ElectroFindTheme(themeMode = state.themeMode) {
                 val navController = rememberNavController()
                 val isLoggedIn by authViewModel.isLoggedIn.collectAsState()
+                val navBackStackEntry by navController.currentBackStackEntryAsState()
+                val currentRoute = navBackStackEntry?.destination?.route
 
-                NavHost(navController, startDestination = if (isLoggedIn) "search" else "login") {
-                    composable("login") {
-                        LoginScreen(authViewModel)
-                        LaunchedEffect(isLoggedIn) {
-                            if (isLoggedIn) {
-                                navController.navigate("search") {
-                                    popUpTo("login") { inclusive = true }
-                                }
+                val hasResults = state.chargers.isNotEmpty() || state.ocmChargers.isNotEmpty()
+                val secondaryScreens = setOf("login", "comparison")
+                val showBottomNav = isLoggedIn && currentRoute !in secondaryScreens
+
+                Scaffold(
+                    bottomBar = {
+                        if (showBottomNav) {
+                            NavigationBar {
+                                NavigationBarItem(
+                                    selected = currentRoute == "search",
+                                    onClick = {
+                                        navController.navigate("search") {
+                                            popUpTo("search") { inclusive = true }
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Search, null) },
+                                    label = { Text("Search") }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute == "results",
+                                    enabled = hasResults,
+                                    onClick = {
+                                        navController.navigate("results") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.AutoMirrored.Filled.List, null) },
+                                    label = { Text("List") }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute in listOf("results_map", "browse_map"),
+                                    onClick = {
+                                        val dest = if (hasResults) "results_map" else "browse_map"
+                                        navController.navigate(dest) {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Map, null) },
+                                    label = { Text("Map") }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute == "settings",
+                                    onClick = {
+                                        navController.navigate("settings") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Settings, null) },
+                                    label = { Text("Settings") }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute == "about",
+                                    onClick = {
+                                        navController.navigate("about") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Info, null) },
+                                    label = { Text("About") }
+                                )
                             }
                         }
                     }
-                    composable("search") {
-                        SearchScreen(
-                            chargerViewModel = chargerViewModel,
-                            onResultsReady = {
-                                navController.navigate("results") {
-                                    launchSingleTop = true
+                ) { innerPadding ->
+                    NavHost(
+                        navController = navController,
+                        startDestination = if (isLoggedIn) "search" else "login",
+                        modifier = Modifier.fillMaxSize().padding(innerPadding)
+                    ) {
+                        composable("login") {
+                            LoginScreen(authViewModel)
+                            LaunchedEffect(isLoggedIn) {
+                                if (isLoggedIn) {
+                                    navController.navigate("search") {
+                                        popUpTo("login") { inclusive = true }
+                                    }
                                 }
-                            },
-                            onBrowseMap = {
-                                navController.navigate("browse_map")
-                            },
-                            onSettings = {
-                                navController.navigate("settings")
                             }
-                        )
-                    }
-                    composable("browse_map") {
-                        val state by chargerViewModel.state.collectAsState()
-                        BrowseMapScreen(
-                            initialLat = if (state.searchLat != 0.0) state.searchLat else 46.0,
-                            initialLng = if (state.searchLng != 0.0) state.searchLng else 2.0,
-                            chargerViewModel = chargerViewModel,
-                            onLocationSelected = { lat, lng ->
-                                chargerViewModel.searchByCoordinates(lat, lng)
-                                navController.navigate("results") { launchSingleTop = true }
-                            },
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-                    composable("results") {
-                        ResultsScreen(
-                            chargerViewModel = chargerViewModel,
-                            onBack = { navController.popBackStack() },
-                            onCompare = { navController.navigate("comparison") },
-                            onViewMap = { navController.navigate("results_map") { launchSingleTop = true } }
-                        )
-                    }
-                    composable("results_map") {
-                        ResultsMapScreen(
-                            chargerViewModel = chargerViewModel,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-                    composable("settings") {
-                        SettingsScreen(
-                            chargerViewModel = chargerViewModel,
-                            appPreferences = (application as ElectroFindApp).appPreferences,
-                            onBack = { navController.popBackStack() },
-                            onAbout = { navController.navigate("about") }
-                        )
-                    }
-                    composable("about") {
-                        AboutScreen(onBack = { navController.popBackStack() })
-                    }
-                    composable("comparison") {
-                        ComparisonScreen(
-                            chargerViewModel = chargerViewModel,
-                            onBack = { navController.popBackStack() }
-                        )
+                        }
+                        composable("search") {
+                            SearchScreen(
+                                chargerViewModel = chargerViewModel,
+                                onResultsReady = {
+                                    navController.navigate("results") { launchSingleTop = true }
+                                },
+                                onBrowseMap = {
+                                    navController.navigate("browse_map") { launchSingleTop = true }
+                                },
+                                onSettings = {
+                                    navController.navigate("settings") { launchSingleTop = true }
+                                }
+                            )
+                        }
+                        composable("browse_map") {
+                            BrowseMapScreen(
+                                initialLat = if (state.searchLat != 0.0) state.searchLat else 51.5,
+                                initialLng = if (state.searchLng != 0.0) state.searchLng else -0.1,
+                                chargerViewModel = chargerViewModel,
+                                onLocationSelected = { lat, lng ->
+                                    chargerViewModel.searchByCoordinates(lat, lng)
+                                    navController.navigate("results_map") { launchSingleTop = true }
+                                },
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable("results") {
+                            ResultsScreen(
+                                chargerViewModel = chargerViewModel,
+                                onCompare = { navController.navigate("comparison") }
+                            )
+                        }
+                        composable("results_map") {
+                            ResultsMapScreen(chargerViewModel = chargerViewModel)
+                        }
+                        composable("settings") {
+                            SettingsScreen(
+                                chargerViewModel = chargerViewModel,
+                                appPreferences = (application as ElectroFindApp).appPreferences,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable("about") {
+                            AboutScreen()
+                        }
+                        composable("comparison") {
+                            ComparisonScreen(
+                                chargerViewModel = chargerViewModel,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                     }
                 }
             }

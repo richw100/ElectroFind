@@ -2,11 +2,12 @@ package com.richwatson.electrofind.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,8 +24,7 @@ import com.richwatson.electrofind.viewmodel.ThemeMode
 fun SettingsScreen(
     chargerViewModel: ChargerViewModel,
     appPreferences: AppPreferences,
-    onBack: () -> Unit,
-    onAbout: () -> Unit = {}
+    onBack: () -> Unit
 ) {
     val state by chargerViewModel.state.collectAsState()
     var ocmKeyInput by remember { mutableStateOf(appPreferences.ocmApiKey) }
@@ -44,6 +44,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -142,20 +143,6 @@ fun SettingsScreen(
                 Text("Save key")
             }
 
-            HorizontalDivider()
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onAbout() }
-                    .padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("About ElectroFind", style = MaterialTheme.typography.bodyLarge)
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
     }
 }

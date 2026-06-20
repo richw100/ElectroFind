@@ -1,8 +1,11 @@
 package com.richwatson.electrofind.viewmodel
 
+import android.app.Application
+import android.location.Geocoder
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.DataSource
 import com.richwatson.electrofind.api.models.LocationSuggestion
@@ -38,6 +41,9 @@ data class SearchState(
     val sortOrder: SortOrder = SortOrder.PRICE_ASC,
     val speedFilter: SpeedFilter = SpeedFilter.ALL,
     val connectorFilter: String = "ALL",
+    val minPriceKwh: Double? = null,
+    val maxPriceKwh: Double? = null,
+    val currencySymbol: String = "€",
     val loadingStatus: String = "",
     val fetchProgress: Float = 0f,
     val dataSource: DataSource = DataSource.ELECTROVERSE,
@@ -53,7 +59,8 @@ data class SearchState(
 class ChargerViewModel(
     private val repository: ChargerRepository,
     private val ocmRepository: OcmRepository,
-    private val appPreferences: AppPreferences
+    private val appPreferences: AppPreferences,
+    private val application: Application
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchState())
@@ -69,7 +76,16 @@ class ChargerViewModel(
     private var suggestionsJob: Job? = null
 
     init {
-        _state.update { it.copy(dataSource = appPreferences.dataSource, searchRadiusMiles = appPreferences.searchRadiusMiles, themeMode = appPreferences.themeMode) }
+        _state.update {
+            it.copy(
+                dataSource = appPreferences.dataSource,
+                searchRadiusMiles = appPreferences.searchRadiusMiles,
+                themeMode = appPreferences.themeMode,
+                savedMapZoom = appPreferences.mapZoom,
+                savedMapCenterLat = appPreferences.mapCenterLat,
+                savedMapCenterLng = appPreferences.mapCenterLng
+            )
+        }
     }
 
     val filteredSortedChargers: List<ChargingLocation>
@@ -101,6 +117,9 @@ class ChargerViewModel(
                 }
             }
 
+            s.minPriceKwh?.let { min -> list = list.filter { (it.pricePerKwh ?: 0.0) >= min } }
+            s.maxPriceKwh?.let { max -> list = list.filter { (it.pricePerKwh ?: 0.0) <= max } }
+
             list = when (s.sortOrder) {
                 SortOrder.PRICE_ASC -> list.sortedBy { it.pricePerKwh ?: Double.MAX_VALUE }
                 SortOrder.PRICE_DESC -> list.sortedByDescending { it.pricePerKwh ?: -1.0 }
@@ -121,6 +140,7 @@ class ChargerViewModel(
                 return@launch
             }
             _state.update { it.copy(searchLat = coords.first, searchLng = coords.second) }
+            detectCurrency(coords.first, coords.second)
             _navigateToResults.tryEmit(Unit)
             val radius = _state.value.searchRadiusMiles
             doSearch(coords.first, coords.second, socketGroups, radius)
@@ -153,6 +173,7 @@ class ChargerViewModel(
                 ocmChargers = emptyList()
             )
         }
+        detectCurrency(lat, lng)
         _navigateToResults.tryEmit(Unit)
         searchJob = viewModelScope.launch {
             val radius = _state.value.searchRadiusMiles
@@ -230,6 +251,9 @@ class ChargerViewModel(
     }
 
     fun saveMapPosition(zoom: Double, lat: Double, lng: Double) {
+        appPreferences.mapZoom = zoom
+        appPreferences.mapCenterLat = lat
+        appPreferences.mapCenterLng = lng
         _state.update { it.copy(savedMapZoom = zoom, savedMapCenterLat = lat, savedMapCenterLng = lng) }
     }
 
@@ -241,6 +265,10 @@ class ChargerViewModel(
         _state.update { it.copy(speedFilter = filter) }
     }
 
+    fun setPriceFilter(min: Double?, max: Double?) {
+        _state.update { it.copy(minPriceKwh = min, maxPriceKwh = max) }
+    }
+
     fun setConnectorFilter(connector: String) {
         _state.update { it.copy(connectorFilter = connector) }
     }
@@ -249,4 +277,34 @@ class ChargerViewModel(
         searchJob?.cancel()
         _state.update { it.copy(chargers = emptyList(), ocmChargers = emptyList(), error = null, isLoadingEv = false, isLoadingOcm = false) }
     }
+
+    fun detectCurrency(lat: Double, lng: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                @Suppress("DEPRECATION")
+                val address = Geocoder(application).getFromLocation(lat, lng, 1)?.firstOrNull()
+                    ?: return@launch
+                val symbol = currencySymbolForCountry(address.countryCode ?: return@launch)
+                _state.update { it.copy(currencySymbol = symbol) }
+            } catch (e: Exception) {
+                Log.w("ChargerViewModel", "Currency detection failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun currencySymbolForCountry(countryCode: String): String = try {
+        when (java.util.Currency.getInstance(java.util.Locale("", countryCode)).currencyCode) {
+            "EUR" -> "€"
+            "GBP" -> "£"
+            "USD" -> "$"
+            "CHF" -> "CHF"
+            "NOK", "SEK", "DKK" -> "kr"
+            "PLN" -> "zł"
+            "CZK" -> "Kč"
+            "HUF" -> "Ft"
+            "RON" -> "lei"
+            else -> java.util.Currency.getInstance(java.util.Locale("", countryCode))
+                .getSymbol(java.util.Locale.getDefault())
+        }
+    } catch (e: Exception) { "€" }
 }

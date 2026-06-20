@@ -2,18 +2,16 @@ package com.richwatson.electrofind.ui.screens
 
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.DataSource
@@ -32,34 +32,33 @@ import com.richwatson.electrofind.viewmodel.SpeedFilter
 @Composable
 fun ResultsScreen(
     chargerViewModel: ChargerViewModel,
-    onBack: () -> Unit,
-    onCompare: () -> Unit = {},
-    onViewMap: () -> Unit = {}
+    onCompare: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
-    // remember(state) forces ResultsScreen to read `state` in its own scope, so when state
-    // changes (chargers added, loading completes) ResultsScreen itself recomposes and chargers
-    // is recomputed — without this, only nested Scaffold lambdas recompose and chargers stays stale
     val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
     var showFilters by remember { mutableStateOf(false) }
-
-    val goBack = {
-        chargerViewModel.clearResults()
-        onBack()
-    }
-    BackHandler { goBack() }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("${chargers.size} chargers within ${state.searchRadiusMiles} miles of ${state.searchQuery}") },
-                navigationIcon = {
-                    IconButton(onClick = goBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                title = {
+                    Column {
+                        Text("ElectroFind", style = MaterialTheme.typography.titleLarge)
+                        if (state.searchQuery.isNotEmpty()) {
+                            Text(
+                                "${chargers.size} chargers · ${state.searchRadiusMiles} mi · ${state.searchQuery}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 },
                 actions = {
-                    if (state.dataSource == DataSource.BOTH && state.chargers.isNotEmpty() && state.ocmChargers.isNotEmpty()) {
+                    if (state.dataSource == DataSource.BOTH &&
+                        state.chargers.isNotEmpty() && state.ocmChargers.isNotEmpty()
+                    ) {
                         IconButton(onClick = onCompare) {
                             Icon(Icons.AutoMirrored.Filled.CompareArrows, "Compare sources")
                         }
@@ -67,110 +66,109 @@ fun ResultsScreen(
                     IconButton(onClick = { showFilters = !showFilters }) {
                         Icon(Icons.Default.FilterList, "Filter / Sort")
                     }
-                    IconButton(onClick = onViewMap) {
-                        Icon(Icons.Default.Map, contentDescription = "View map")
-                    }
                 }
             )
         }
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-                if (state.isLoading) {
-                    if (state.fetchProgress > 0f) {
-                        LinearProgressIndicator(
-                            progress = { state.fetchProgress },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-                    if (state.loadingStatus.isNotEmpty()) {
-                        Text(
-                            state.loadingStatus,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
-                        )
-                    }
+            if (state.isLoading) {
+                if (state.fetchProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { state.fetchProgress },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
-                if (showFilters) {
-                    FilterBar(chargerViewModel)
-                    HorizontalDivider()
-                }
-                state.ocmError?.let { err ->
+                if (state.loadingStatus.isNotEmpty()) {
                     Text(
-                        "OCM: $err",
+                        state.loadingStatus,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
                     )
                 }
-
-                if (state.isLoading && chargers.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            CircularProgressIndicator()
-                            if (state.loadingStatus.isNotEmpty()) {
-                                Text(
-                                    state.loadingStatus,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                } else if (chargers.isEmpty()) {
+            }
+            if (showFilters) {
+                FilterBar(chargerViewModel)
+                HorizontalDivider()
+            }
+            state.ocmError?.let { err ->
+                Text(
+                    "OCM: $err",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
+            if (state.isLoading && chargers.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(state.error ?: "No chargers found. Try a different location or connector filter.")
+                        CircularProgressIndicator()
                         if (state.loadingStatus.isNotEmpty()) {
-                            Spacer(Modifier.height(16.dp))
                             Text(
                                 state.loadingStatus,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(chargers, key = { "${it.sourceDisplay}_${it.pk}" }) { charger ->
-                            ChargerCard(charger = charger, showSourceBadge = state.dataSource == DataSource.BOTH)
-                        }
+                }
+            } else if (chargers.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(state.error ?: "No chargers found. Try a different location or connector filter.")
+                    if (state.loadingStatus.isNotEmpty()) {
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            state.loadingStatus,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(chargers, key = { "${it.sourceDisplay}_${it.pk}" }) { charger ->
+                        ChargerCard(charger = charger, showSourceBadge = state.dataSource == DataSource.BOTH, currencySymbol = state.currencySymbol)
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun FilterBar(vm: ChargerViewModel) {
+internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
     val state by vm.state.collectAsState()
+    var minInput by remember { mutableStateOf(state.minPriceKwh?.toString() ?: "") }
+    var maxInput by remember { mutableStateOf(state.maxPriceKwh?.toString() ?: "") }
+
     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-        // Sort order
-        Text("Sort by", style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SortOrder.entries.forEach { order ->
-                FilterChip(
-                    selected = state.sortOrder == order,
-                    onClick = { vm.setSortOrder(order) },
-                    label = { Text(order.label) }
-                )
+        if (showSort) {
+            Text("Sort by", style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SortOrder.entries.forEach { order ->
+                    FilterChip(
+                        selected = state.sortOrder == order,
+                        onClick = { vm.setSortOrder(order) },
+                        label = { Text(order.label) }
+                    )
+                }
             }
+            Spacer(Modifier.height(6.dp))
         }
-        Spacer(Modifier.height(6.dp))
-        // Speed filter
         Text("Min speed", style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SpeedFilter.entries.forEach { filter ->
@@ -182,7 +180,6 @@ private fun FilterBar(vm: ChargerViewModel) {
             }
         }
         Spacer(Modifier.height(6.dp))
-        // Connector filter
         Text("Connector", style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("ALL", "CCS", "Type 2", "CHAdeMO").forEach { connector ->
@@ -193,11 +190,39 @@ private fun FilterBar(vm: ChargerViewModel) {
                 )
             }
         }
+        Spacer(Modifier.height(6.dp))
+        Text("Price per kWh (${state.currencySymbol})", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = minInput,
+                onValueChange = { v ->
+                    minInput = v
+                    vm.setPriceFilter(v.toDoubleOrNull(), state.maxPriceKwh)
+                },
+                label = { Text("Min") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                prefix = { Text(state.currencySymbol) }
+            )
+            OutlinedTextField(
+                value = maxInput,
+                onValueChange = { v ->
+                    maxInput = v
+                    vm.setPriceFilter(state.minPriceKwh, v.toDoubleOrNull())
+                },
+                label = { Text("Max") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                prefix = { Text(state.currencySymbol) }
+            )
+        }
     }
 }
 
 @Composable
-private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = false) {
+private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = false, currencySymbol: String = "€") {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -247,7 +272,6 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    // Show OCM text pricing when no structured price
                     if (charger.pricePerKwh == null && charger.pricingText != null) {
                         Text(
                             charger.pricingText,
@@ -256,14 +280,12 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                         )
                     }
                 }
-                // Price badge
-                PriceBadge(charger)
+                PriceBadge(charger, currencySymbol)
             }
 
             Spacer(Modifier.height(8.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Availability
                 val availColor = if (charger.hasAvailableEvse) Color(0xFF2E7D32) else Color(0xFFB71C1C)
                 val availText = if (charger.hasAvailableEvse) "Available" else "In use"
                 AssistChip(
@@ -271,14 +293,12 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                     label = { Text(availText, style = MaterialTheme.typography.labelSmall) },
                     colors = AssistChipDefaults.assistChipColors(containerColor = availColor.copy(alpha = 0.12f))
                 )
-                // Max speed
                 charger.maxKilowatts?.let { kw ->
                     AssistChip(
                         onClick = {},
                         label = { Text("${kw.toInt()} kW", style = MaterialTheme.typography.labelSmall) }
                     )
                 }
-                // Connectors
                 charger.connectorTypes.forEach { ct ->
                     AssistChip(
                         onClick = {},
@@ -287,10 +307,9 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                 }
             }
 
-            // Connection fee note
             charger.connectionFeeMajor?.let { fee ->
                 Text(
-                    "+ €%.2f connection fee".format(fee),
+                    "+ %s%.2f connection fee".format(currencySymbol, fee),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -339,7 +358,7 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
 }
 
 @Composable
-private fun PriceBadge(charger: ChargingLocation) {
+private fun PriceBadge(charger: ChargingLocation, currencySymbol: String = "€") {
     val price = charger.pricePerKwh
     val bgColor = when {
         price == null -> MaterialTheme.colorScheme.surfaceVariant
@@ -362,7 +381,7 @@ private fun PriceBadge(charger: ChargingLocation) {
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "€%.2f".format(price),
+                    "%s%.2f".format(currencySymbol, price),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = bgColor
@@ -373,13 +392,13 @@ private fun PriceBadge(charger: ChargingLocation) {
     }
 }
 
-private val SortOrder.label: String get() = when (this) {
+internal val SortOrder.label: String get() = when (this) {
     SortOrder.PRICE_ASC -> "Cheapest first"
     SortOrder.PRICE_DESC -> "Most expensive"
     SortOrder.SPEED_DESC -> "Fastest first"
 }
 
-private val SpeedFilter.label: String get() = when (this) {
+internal val SpeedFilter.label: String get() = when (this) {
     SpeedFilter.ALL -> "Any"
     SpeedFilter.FAST -> "7+ kW"
     SpeedFilter.RAPID -> "22+ kW"

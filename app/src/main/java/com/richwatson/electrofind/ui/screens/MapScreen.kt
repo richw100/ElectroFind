@@ -26,10 +26,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
@@ -68,6 +70,9 @@ import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import kotlinx.coroutines.delay
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.MapEventsOverlay
@@ -122,14 +127,19 @@ fun BrowseMapScreen(
                 .padding(padding)
                 .fillMaxSize()
         ) {
+            val savedLat = state.savedMapCenterLat
+            val savedLng = state.savedMapCenterLng
+            val hasSaved = savedLat != 0.0 || savedLng != 0.0
             ChargerMapView(
                 chargers = emptyList(),
                 searchLat = initialLat,
                 searchLng = initialLng,
-                initialZoom = 8.0,
+                initialZoom = if (hasSaved) state.savedMapZoom else 8.0,
+                initialCenter = if (hasSaved) GeoPoint(savedLat, savedLng) else null,
                 centerOn = pendingCenter,
                 radiusMiles = state.searchRadiusMiles,
                 modifier = Modifier.fillMaxSize(),
+                onMapPositionSaved = { zoom, lat, lng -> chargerViewModel.saveMapPosition(zoom, lat, lng) },
                 onLocationSelected = onLocationSelected
             )
 
@@ -151,8 +161,35 @@ fun BrowseMapScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 2.dp),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            val top = suggestions.firstOrNull()
+                            if (top != null) {
+                                searchText = top.primaryName
+                                suggestionsExpanded = false
+                                chargerViewModel.clearSuggestions()
+                                keyboardController?.hide()
+                                pendingCenter = GeoPoint(top.lat, top.lng)
+                            } else {
+                                chargerViewModel.fetchSuggestions(searchText)
+                                suggestionsExpanded = true
+                            }
+                        }),
                         trailingIcon = {
-                            Icon(Icons.Default.Search, contentDescription = null)
+                            IconButton(onClick = {
+                                val top = suggestions.firstOrNull()
+                                if (top != null) {
+                                    searchText = top.primaryName
+                                    suggestionsExpanded = false
+                                    chargerViewModel.clearSuggestions()
+                                    keyboardController?.hide()
+                                    pendingCenter = GeoPoint(top.lat, top.lng)
+                                } else {
+                                    chargerViewModel.fetchSuggestions(searchText)
+                                    suggestionsExpanded = true
+                                }
+                            }) {
+                                Icon(Icons.Default.Search, contentDescription = "Search")
+                            }
                         }
                     )
                     if (suggestionsExpanded && suggestions.isNotEmpty()) {
@@ -193,31 +230,33 @@ fun BrowseMapScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultsMapScreen(
-    chargerViewModel: ChargerViewModel,
-    onBack: () -> Unit
+    chargerViewModel: ChargerViewModel
 ) {
     val state by chargerViewModel.state.collectAsState()
     val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
+    var showFilters by remember { mutableStateOf(false) }
 
-    val initialCenter = if (state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0)
-        GeoPoint(state.savedMapCenterLat, state.savedMapCenterLng)
-    else if (state.searchLat != 0.0 || state.searchLng != 0.0)
-        GeoPoint(state.searchLat, state.searchLng)
-    else null
+    val initialCenter = when {
+        state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0 ->
+            GeoPoint(state.savedMapCenterLat, state.savedMapCenterLng)
+        state.searchLat != 0.0 || state.searchLng != 0.0 ->
+            GeoPoint(state.searchLat, state.searchLng)
+        else -> GeoPoint(52.5, -1.5)
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Map · ${chargers.size} chargers") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                actions = {
+                    IconButton(onClick = { showFilters = !showFilters }) {
+                        Icon(Icons.Default.FilterList, "Filter / Sort")
                     }
                 }
             )
         }
     ) { padding ->
-        if (initialCenter != null) {
+        Box(Modifier.padding(padding).fillMaxSize()) {
             ChargerMapView(
                 chargers = chargers,
                 searchLat = state.searchLat,
@@ -225,18 +264,24 @@ fun ResultsMapScreen(
                 initialZoom = state.savedMapZoom,
                 initialCenter = initialCenter,
                 radiusMiles = state.searchRadiusMiles,
-                modifier = Modifier.padding(padding).fillMaxSize(),
+                currencySymbol = state.currencySymbol,
+                modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
                 },
                 onLocationSelected = { lat, lng ->
                     chargerViewModel.searchByCoordinates(lat, lng)
-                    onBack()
                 }
             )
-        } else {
-            Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Map unavailable — search coordinates not set.")
+            if (showFilters) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    FilterBar(chargerViewModel, showSort = false)
+                }
             }
         }
     }
@@ -251,6 +296,7 @@ fun ChargerMapView(
     initialCenter: GeoPoint? = null,
     centerOn: GeoPoint? = null,
     radiusMiles: Int = 0,
+    currencySymbol: String = "€",
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onLocationSelected: ((Double, Double) -> Unit)? = null
@@ -276,7 +322,7 @@ fun ChargerMapView(
         }
     }
 
-    LaunchedEffect(chargers, radiusMiles, myLocationPoint) {
+    LaunchedEffect(chargers, radiusMiles, myLocationPoint, currencySymbol) {
         mapView.overlays.clear()
 
         if (radiusMiles > 0 && (searchLat != 0.0 || searchLng != 0.0)) {
@@ -303,8 +349,18 @@ fun ChargerMapView(
             val myMarker = Marker(mapView).apply {
                 position = myLoc
                 title = "You are here"
+                snippet = "Tap to search here"
                 icon = myLocationDrawable(context)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setOnMarkerClickListener { marker, _ ->
+                    if (marker.isInfoWindowShown) {
+                        onLocationSelected?.invoke(myLoc.latitude, myLoc.longitude)
+                        marker.closeInfoWindow()
+                    } else {
+                        marker.showInfoWindow()
+                    }
+                    true
+                }
             }
             mapView.overlays.add(myMarker)
         }
@@ -314,11 +370,11 @@ fun ChargerMapView(
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
                 title = charger.name
                 snippet = buildString {
-                    charger.pricePerKwh?.let { append("€%.2f/kWh · ".format(it)) }
+                    charger.pricePerKwh?.let { append("%s%.2f/kWh · ".format(currencySymbol, it)) }
                     append(charger.operator.name)
                     append(if (charger.hasAvailableEvse) " · Available" else " · In use")
                 }
-                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, isOcm = charger.sourceDisplay == com.richwatson.electrofind.api.models.DataSource.OCM)
+                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, isOcm = charger.sourceDisplay == com.richwatson.electrofind.api.models.DataSource.OCM, currencySymbol = currencySymbol)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
                     dialogCharger = charger
@@ -341,8 +397,22 @@ fun ChargerMapView(
     }
 
     DisposableEffect(Unit) {
+        val mapListener = object : MapListener {
+            override fun onScroll(event: ScrollEvent): Boolean {
+                val c = mapView.mapCenter
+                onMapPositionSaved(mapView.zoomLevelDouble, c.latitude, c.longitude)
+                return false
+            }
+            override fun onZoom(event: ZoomEvent): Boolean {
+                val c = mapView.mapCenter
+                onMapPositionSaved(mapView.zoomLevelDouble, c.latitude, c.longitude)
+                return false
+            }
+        }
+        mapView.addMapListener(mapListener)
         mapView.onResume()
         onDispose {
+            mapView.removeMapListener(mapListener)
             val c = mapView.mapCenter
             onMapPositionSaved(mapView.zoomLevelDouble, c.latitude, c.longitude)
             mapView.onPause()
@@ -397,7 +467,7 @@ fun ChargerMapView(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     charger.pricePerKwh?.let {
-                        Text("€%.2f/kWh".format(it), style = MaterialTheme.typography.bodyMedium)
+                        Text("%s%.2f/kWh".format(currencySymbol, it), style = MaterialTheme.typography.bodyMedium)
                     }
                     Text(
                         if (charger.hasAvailableEvse) "Available" else "In use",
@@ -492,7 +562,7 @@ private fun myLocationDrawable(context: Context): Drawable {
 @Composable
 private fun LocalContext() = androidx.compose.ui.platform.LocalContext.current
 
-private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, isOcm: Boolean = false): Drawable {
+private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, isOcm: Boolean = false, currencySymbol: String = "€"): Drawable {
     val dp = context.resources.displayMetrics.density
     val w = (68 * dp).toInt()
     val h = (32 * dp).toInt()
@@ -524,7 +594,7 @@ private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolea
         isOcm -> "OCM$staleTag"
         price == null -> "?$staleTag"
         price == 0.0 -> "FREE$staleTag"
-        else -> "€%.2f$staleTag".format(price)
+        else -> "%s%.2f$staleTag".format(currencySymbol, price)
     }
     val yPos = h / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
     canvas.drawText(label, w / 2f, yPos, textPaint)

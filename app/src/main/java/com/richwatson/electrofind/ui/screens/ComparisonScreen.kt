@@ -65,7 +65,7 @@ fun ComparisonScreen(chargerViewModel: ChargerViewModel, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(entries) { entry ->
-                    ComparisonCard(entry)
+                    ComparisonCard(entry, state.currencySymbol)
                 }
             }
         }
@@ -73,7 +73,7 @@ fun ComparisonScreen(chargerViewModel: ChargerViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun ComparisonCard(entry: ComparisonEntry) {
+private fun ComparisonCard(entry: ComparisonEntry, currencySymbol: String = "€") {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -112,7 +112,7 @@ private fun ComparisonCard(entry: ComparisonEntry) {
                         val ev = entry.electroverse
                         val price = ev.pricePerKwh
                         Text(
-                            if (price != null) "€%.2f/kWh".format(price) else "Price unknown",
+                            if (price != null) "%s%.2f/kWh".format(currencySymbol, price) else "Price unknown",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold
                         )
