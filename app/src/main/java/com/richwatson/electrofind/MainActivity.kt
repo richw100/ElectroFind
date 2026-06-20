@@ -167,7 +167,7 @@ class MainActivity : ComponentActivity() {
                                 initialLng = if (state.searchLng != 0.0) state.searchLng else -0.1,
                                 chargerViewModel = chargerViewModel,
                                 onLocationSelected = { lat, lng ->
-                                    chargerViewModel.searchByCoordinates(lat, lng)
+                                    chargerViewModel.searchByCoordinates(lat, lng, reverseGeocodePrefix = "Map pin")
                                     navController.navigate("results_map") { launchSingleTop = true }
                                 },
                                 onBack = { navController.popBackStack() }

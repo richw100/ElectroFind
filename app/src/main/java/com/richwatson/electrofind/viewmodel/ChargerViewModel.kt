@@ -155,8 +155,9 @@ class ChargerViewModel(
         _suggestions.value = emptyList()
     }
 
-    fun searchByCoordinates(lat: Double, lng: Double, label: String? = null, socketGroups: List<String> = listOf("CCS", "TYPE_2"), isNearMe: Boolean = false) {
-        val immediateLabel = label ?: if (isNearMe) "Near me" else "%.4f, %.4f".format(lat, lng)
+    fun searchByCoordinates(lat: Double, lng: Double, label: String? = null, socketGroups: List<String> = listOf("CCS", "TYPE_2"), isNearMe: Boolean = false, reverseGeocodePrefix: String? = null) {
+        val prefix = if (isNearMe) "Near me" else reverseGeocodePrefix
+        val immediateLabel = label ?: prefix ?: "%.4f, %.4f".format(lat, lng)
         searchJob?.cancel()
         _state.update {
             it.copy(
@@ -168,14 +169,14 @@ class ChargerViewModel(
             )
         }
         addToHistory(immediateLabel, lat, lng)
-        if (isNearMe) {
+        if (prefix != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
                     @Suppress("DEPRECATION")
                     val address = Geocoder(application).getFromLocation(lat, lng, 1)?.firstOrNull()
                     val town = address?.locality ?: address?.subLocality ?: address?.subAdminArea ?: address?.adminArea
-                    if (town != null) updateHistoryLabel(immediateLabel, "Near me · $town", lat, lng)
-                } catch (e: Exception) { /* keep "Near me" */ }
+                    if (town != null) updateHistoryLabel(immediateLabel, "$prefix · $town", lat, lng)
+                } catch (_: Exception) { }
             }
         }
         detectCurrency(lat, lng)
