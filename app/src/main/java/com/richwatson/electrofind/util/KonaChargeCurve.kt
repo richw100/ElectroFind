@@ -120,6 +120,7 @@ object KonaChargeCurve {
     data class SimResult(
         val endSocPercent: Float,
         val energyKwh: Double,
+        val billedEnergyKwh: Double,
         val chargeMinutes: Double,
         val reachedTarget: Boolean
     )
@@ -131,8 +132,9 @@ object KonaChargeCurve {
         stayMinutes: Double? = null
     ): SimResult {
         if (chargerMaxKw <= 0.0 || startSoc >= targetSoc) {
-            return SimResult(startSoc, 0.0, 0.0, startSoc >= targetSoc)
+            return SimResult(startSoc, 0.0, 0.0, 0.0, startSoc >= targetSoc)
         }
+        val efficiency = if (chargerMaxKw >= 22.0) 0.95 else 0.88
         val step = 0.1f
         val energyPerStep = BATTERY_KWH * (step / 100.0)
         var soc = startSoc
@@ -142,20 +144,20 @@ object KonaChargeCurve {
         while (soc < targetSoc) {
             val effectiveKw = minOf(chargerMaxKw, powerAtSoc(soc).toDouble())
             if (effectiveKw <= 0.0) break
-            val timeStep = (energyPerStep / effectiveKw) * 60.0
+            val timeStep = (energyPerStep / (effectiveKw * efficiency)) * 60.0
             if (stayMinutes != null && totalMinutes + timeStep > stayMinutes) {
                 val remaining = stayMinutes - totalMinutes
                 val fraction = remaining / timeStep
                 totalEnergy += energyPerStep * fraction
                 totalMinutes = stayMinutes
                 soc += step * fraction.toFloat()
-                return SimResult(soc, totalEnergy, totalMinutes, false)
+                return SimResult(soc, totalEnergy, totalEnergy / efficiency, totalMinutes, false)
             }
             totalEnergy += energyPerStep
             totalMinutes += timeStep
             soc += step
         }
-        return SimResult(targetSoc, totalEnergy, totalMinutes, true)
+        return SimResult(targetSoc, totalEnergy, totalEnergy / efficiency, totalMinutes, true)
     }
 
     fun totalCost(
@@ -167,7 +169,7 @@ object KonaChargeCurve {
         stayMinutes: Double = result.chargeMinutes
     ): Double {
         val idleMinutes = (stayMinutes - result.chargeMinutes).coerceAtLeast(0.0)
-        return pricePerKwh * result.energyKwh +
+        return pricePerKwh * result.billedEnergyKwh +
                 connectionFee +
                 chargingRatePerMin * result.chargeMinutes +
                 parkingRatePerMin * idleMinutes

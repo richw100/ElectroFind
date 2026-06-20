@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -28,6 +29,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.richwatson.electrofind.ui.screens.AboutScreen
+import com.richwatson.electrofind.ui.screens.ChargeCurveScreen
 import com.richwatson.electrofind.ui.screens.BrowseMapScreen
 import com.richwatson.electrofind.ui.screens.LoginScreen
 import com.richwatson.electrofind.ui.screens.ResultsMapScreen
@@ -118,6 +120,17 @@ class MainActivity : ComponentActivity() {
                                     label = { Text("Settings") }
                                 )
                                 NavigationBarItem(
+                                    selected = currentRoute == "curve",
+                                    onClick = {
+                                        navController.navigate("curve") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.ShowChart, null) },
+                                    label = { Text("Curve") }
+                                )
+                                NavigationBarItem(
                                     selected = currentRoute == "about",
                                     onClick = {
                                         navController.navigate("about") {
@@ -191,6 +204,9 @@ class MainActivity : ComponentActivity() {
                                 appPreferences = (application as ElectroFindApp).appPreferences,
                                 onBack = { navController.popBackStack() }
                             )
+                        }
+                        composable("curve") {
+                            ChargeCurveScreen(chargerViewModel = chargerViewModel)
                         }
                         composable("about") {
                             AboutScreen()

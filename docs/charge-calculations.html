@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ElectroFind — Charge &amp; Cost Calculations</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.6; }
+    h1 { border-bottom: 2px solid #1976d2; padding-bottom: 8px; color: #1976d2; }
+    h2 { margin-top: 2em; color: #1565c0; }
+    h3 { color: #333; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+    pre { background: #f4f4f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+    th { background: #1976d2; color: #fff; padding: 8px 12px; text-align: left; }
+    td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    .note { background: #fff8e1; border-left: 4px solid #f9a825; padding: 10px 16px; margin: 1em 0; border-radius: 0 4px 4px 0; }
+    .formula { background: #e8f5e9; border-left: 4px solid #388e3c; padding: 10px 16px; margin: 1em 0; border-radius: 0 4px 4px 0; font-family: monospace; }
+  </style>
+</head>
+<body>
+
+<h1>ElectroFind — Charge &amp; Cost Calculations</h1>
+<p>This document describes how ElectroFind estimates charging time and cost for a Hyundai Kona Electric (Long Range, 77.4 kWh usable battery).</p>
+
+<hr>
+
+<h2>1. The Charge Curve</h2>
+<p>
+  The car's Battery Management System (BMS) limits how much power it will accept at each state of charge (SoC).
+  ElectroFind encodes this as 101 data points extracted from a measured charge curve, one per integer SoC percentage (0–100%).
+  Each point is a <code>(SoC%, kW)</code> pair representing the maximum power the car will accept at that SoC.
+</p>
+
+<h3>Key shape</h3>
+<table>
+  <tr><th>SoC range</th><th>Accepted power</th><th>Notes</th></tr>
+  <tr><td>0–10%</td><td>50 → 91 kW</td><td>Ramp-up from cold</td></tr>
+  <tr><td>11–61%</td><td>~92–100 kW</td><td>Full-power plateau</td></tr>
+  <tr><td>62–67%</td><td>~75 kW</td><td>First taper</td></tr>
+  <tr><td>68–73%</td><td>~45 kW</td><td>Second taper</td></tr>
+  <tr><td>74–80%</td><td>~37–46 kW</td><td>Gradual reduction</td></tr>
+  <tr><td>81–82%</td><td>~25–31 kW</td><td>Sharp drop</td></tr>
+  <tr><td>83–92%</td><td>~25 kW</td><td>Low-power plateau</td></tr>
+  <tr><td>93–100%</td><td>24 → 8 kW</td><td>Final taper to full</td></tr>
+</table>
+
+<p>
+  Between integer SoC values, power is computed by <strong>linear interpolation</strong>:
+</p>
+<div class="formula">
+  powerAtSoc(soc) = curve[floor(soc)] + (curve[ceil(soc)] − curve[floor(soc)]) × (soc − floor(soc))
+</div>
+
+<hr>
+
+<h2>2. Charging Efficiency</h2>
+<p>
+  Not all power drawn from the charger reaches the battery. The loss depends on whether the charger is AC or DC:
+</p>
+<table>
+  <tr><th>Charger type</th><th>Threshold</th><th>Efficiency</th><th>Reason</th></tr>
+  <tr>
+    <td>DC fast charge</td>
+    <td>≥ 22 kW</td>
+    <td>95%</td>
+    <td>The charger converts AC→DC externally. Losses are small and occur outside the car.</td>
+  </tr>
+  <tr>
+    <td>AC charge</td>
+    <td>&lt; 22 kW</td>
+    <td>88%</td>
+    <td>The car's onboard charger converts AC→DC internally, generating heat (~12% lost).</td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>Conservative estimate:</strong> costs and times are calculated using the grid draw (what the meter measures),
+  not the energy that reaches the battery. On AC charging you pay for roughly 12% more kWh than go into the battery.
+</div>
+
+<hr>
+
+<h2>3. Time Simulation</h2>
+<p>
+  The simulation steps through the charge in <strong>0.1% SoC increments</strong> from <code>startSoc</code>
+  to <code>targetSoc</code> (or until the stay time is exhausted).
+</p>
+
+<h3>Per-step calculation</h3>
+<ol>
+  <li>
+    <strong>Energy per step</strong> — fixed, regardless of charger speed:
+    <div class="formula">energyPerStep = 77.4 kWh × 0.001 = 0.0774 kWh</div>
+  </li>
+  <li>
+    <strong>Effective power</strong> — the lower of what the charger can deliver and what the car will accept:
+    <div class="formula">effectiveKw = min(chargerMaxKw, powerAtSoc(currentSoc))</div>
+  </li>
+  <li>
+    <strong>Time for this step</strong> — divided by efficiency so AC sessions correctly take longer:
+    <div class="formula">timeStep (minutes) = energyPerStep ÷ (effectiveKw × efficiency) × 60</div>
+    <p>Operator precedence: <code>(energyPerStep ÷ (effectiveKw × efficiency))</code> gives hours; × 60 converts to minutes.</p>
+  </li>
+  <li>
+    <strong>Stay-time check</strong> — if a stay limit is set and the next step would exceed it,
+    a partial step is applied proportional to the remaining time, then the simulation stops:
+    <div class="formula">
+      remaining = stayMinutes − accumulatedMinutes<br>
+      fraction  = remaining ÷ timeStep<br>
+      energyAdded = energyPerStep × fraction<br>
+      socGained   = 0.1% × fraction
+    </div>
+  </li>
+</ol>
+
+<h3>Outputs</h3>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td><code>endSocPercent</code></td><td>SoC reached at the end of the session</td></tr>
+  <tr><td><code>energyKwh</code></td><td>Net energy delivered to the battery (kWh)</td></tr>
+  <tr><td><code>billedEnergyKwh</code></td><td>Grid draw = <code>energyKwh ÷ efficiency</code> — what the meter records</td></tr>
+  <tr><td><code>chargeMinutes</code></td><td>Total time actively charging</td></tr>
+  <tr><td><code>reachedTarget</code></td><td>Whether the target SoC was reached before the stay limit</td></tr>
+</table>
+
+<hr>
+
+<h2>4. Two Simulation Modes</h2>
+<table>
+  <tr><th>Mode</th><th>How it runs</th><th>What it answers</th></tr>
+  <tr>
+    <td><strong>Optimal</strong></td>
+    <td>No stay limit (<code>stayMinutes = null</code>). Runs to target SoC.</td>
+    <td>"How long will it take to reach my target, and what will it cost?"</td>
+  </tr>
+  <tr>
+    <td><strong>Stay</strong></td>
+    <td>Stay limit set. Stops at whichever comes first: target SoC or time limit.</td>
+    <td>"If I stay for N minutes, what SoC will I reach and what will it cost?"</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>5. Cost Calculation</h2>
+<p>Given a <code>SimResult</code>, the total cost is:</p>
+
+<div class="formula">
+  cost = billedEnergyKwh × pricePerKwh<br>
+       + connectionFee<br>
+       + chargingRatePerMin × chargeMinutes<br>
+       + parkingRatePerMin  × idleMinutes
+</div>
+
+<p>Where:</p>
+<div class="formula">idleMinutes = max(0, stayMinutes − chargeMinutes)</div>
+
+<p>
+  <code>idleMinutes</code> is the time after the car has finished charging but the session is still running
+  (e.g. the car reached 80% after 25 minutes but you stayed for 30). Chargers that levy an idle/parking fee
+  apply it to this window.
+</p>
+
+<h3>Tariff components sourced from Electroverse</h3>
+<table>
+  <tr><th>Field</th><th>Applied to</th></tr>
+  <tr><td>Price per kWh</td><td>Billed grid energy</td></tr>
+  <tr><td>Connection fee</td><td>Fixed per session</td></tr>
+  <tr><td>Per-minute charging rate</td><td>Time spent actively charging</td></tr>
+  <tr><td>Per-minute idle/parking rate</td><td>Time in session after charging completes</td></tr>
+</table>
+
+<div class="note">
+  Not all chargers publish all components. Where a field is absent it is treated as zero.
+  Costs should be treated as estimates — actual billing may vary by network and tariff.
+</div>
+
+<hr>
+
+<h2>6. Limitations</h2>
+<ul>
+  <li>The charge curve is specific to the <strong>Hyundai Kona Electric Long Range (77.4 kWh)</strong>. Other vehicles will charge differently.</li>
+  <li>The curve was measured under nominal conditions. Cold batteries charge more slowly; very hot batteries may also throttle.</li>
+  <li>Efficiency figures (95% DC / 88% AC) are typical values. Actual efficiency varies by charger, cable, and temperature.</li>
+  <li>The simulation does not model pre-conditioning, cell balancing pauses, or network-imposed power limits.</li>
+  <li>Tariff data comes from Electroverse and may be incomplete or out of date.</li>
+</ul>
+
+</body>
+</html>
