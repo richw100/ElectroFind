@@ -29,7 +29,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.richwatson.electrofind.ui.screens.AboutScreen
 import com.richwatson.electrofind.ui.screens.BrowseMapScreen
-import com.richwatson.electrofind.ui.screens.ComparisonScreen
 import com.richwatson.electrofind.ui.screens.LoginScreen
 import com.richwatson.electrofind.ui.screens.ResultsMapScreen
 import com.richwatson.electrofind.ui.screens.ResultsScreen
@@ -49,7 +48,7 @@ class MainActivity : ComponentActivity() {
     private val chargerViewModel: ChargerViewModel by lazy {
         val app = application as ElectroFindApp
         ViewModelProvider(this, factory {
-            ChargerViewModel(app.repository, app.ocmRepository, app.appPreferences, app)
+            ChargerViewModel(app.repository, app.appPreferences, app)
         })[ChargerViewModel::class.java]
     }
 
@@ -64,8 +63,8 @@ class MainActivity : ComponentActivity() {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
 
-                val hasResults = state.chargers.isNotEmpty() || state.ocmChargers.isNotEmpty()
-                val secondaryScreens = setOf("login", "comparison")
+                val hasResults = state.chargers.isNotEmpty()
+                val secondaryScreens = setOf("login")
                 val showBottomNav = isLoggedIn && currentRoute !in secondaryScreens
 
                 Scaffold(
@@ -177,7 +176,6 @@ class MainActivity : ComponentActivity() {
                         composable("results") {
                             ResultsScreen(
                                 chargerViewModel = chargerViewModel,
-                                onCompare = { navController.navigate("comparison") },
                                 onShowOnMap = { charger ->
                                     chargerViewModel.selectCharger(charger.pk)
                                     navController.navigate("results_map") { launchSingleTop = true }
@@ -196,12 +194,6 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("about") {
                             AboutScreen()
-                        }
-                        composable("comparison") {
-                            ComparisonScreen(
-                                chargerViewModel = chargerViewModel,
-                                onBack = { navController.popBackStack() }
-                            )
                         }
                     }
                 }

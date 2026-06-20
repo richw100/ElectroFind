@@ -5,10 +5,9 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [CachedChargerEntity::class, CachedOcmEntity::class], version = 3, exportSchema = false)
+@Database(entities = [CachedChargerEntity::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun chargerDao(): ChargerDao
-    abstract fun ocmDao(): OcmDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null

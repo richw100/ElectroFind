@@ -2,8 +2,6 @@ package com.richwatson.electrofind.api.models
 
 import com.google.gson.annotations.SerializedName
 
-enum class DataSource { ELECTROVERSE, OCM, BOTH }
-
 // ---- GraphQL transport ----
 
 data class GraphQLRequest(
@@ -60,12 +58,8 @@ data class ChargingLocation(
     val capabilities: List<Capability>?,
     val evses: EvseConnection,
     val cachedAt: Long = 0L,
-    val source: DataSource? = null,
     val pricingText: String? = null
 ) {
-    // Non-data computed property: source with Electroverse as default
-    val sourceDisplay: DataSource get() = source ?: DataSource.ELECTROVERSE
-
     // True when loaded from cache and data is older than one week
     val isStale: Boolean get() = cachedAt > 0 && System.currentTimeMillis() - cachedAt > STALE_MS
 

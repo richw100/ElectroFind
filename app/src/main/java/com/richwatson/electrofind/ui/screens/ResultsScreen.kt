@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Map
@@ -29,7 +28,6 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
-import com.richwatson.electrofind.api.models.DataSource
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import com.richwatson.electrofind.viewmodel.SortOrder
@@ -41,7 +39,6 @@ data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes:
 @Composable
 fun ResultsScreen(
     chargerViewModel: ChargerViewModel,
-    onCompare: () -> Unit = {},
     onShowOnMap: (ChargingLocation) -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
@@ -66,13 +63,6 @@ fun ResultsScreen(
                     }
                 },
                 actions = {
-                    if (state.dataSource == DataSource.BOTH &&
-                        state.chargers.isNotEmpty() && state.ocmChargers.isNotEmpty()
-                    ) {
-                        IconButton(onClick = onCompare) {
-                            Icon(Icons.AutoMirrored.Filled.CompareArrows, "Compare sources")
-                        }
-                    }
                     IconButton(onClick = { showFilters = !showFilters }) {
                         Icon(Icons.Default.FilterList, "Filter / Sort")
                     }
@@ -102,16 +92,6 @@ fun ResultsScreen(
             if (showFilters) {
                 FilterBar(chargerViewModel)
                 HorizontalDivider()
-            }
-            state.ocmError?.let { err ->
-                Text(
-                    "OCM: $err",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                )
             }
             if (state.isLoading && chargers.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -150,13 +130,12 @@ fun ResultsScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(chargers, key = { "${it.sourceDisplay}_${it.pk}" }) { charger ->
+                    items(chargers, key = { it.pk }) { charger ->
                         val distanceMiles = if (state.searchLat != 0.0 || state.searchLng != 0.0)
                             haversineMiles(state.searchLat, state.searchLng, charger.coordinates.latitude, charger.coordinates.longitude)
                         else null
                         ChargerCard(
                             charger = charger,
-                            showSourceBadge = state.dataSource == DataSource.BOTH,
                             currencySymbol = state.currencySymbol,
                             session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes),
                             distanceMiles = distanceMiles,
@@ -175,13 +154,8 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
     val state by vm.state.collectAsState()
     val filtered = remember(state) { vm.filteredSortedChargers }
 
-    val priceMax = remember(state.chargers, state.ocmChargers, state.dataSource) {
-        val all = when (state.dataSource) {
-            DataSource.ELECTROVERSE -> state.chargers
-            DataSource.OCM -> state.ocmChargers
-            DataSource.BOTH -> state.chargers + state.ocmChargers
-        }
-        (all.mapNotNull { it.pricePerKwh }.filter { it > 0 }.maxOrNull()?.toFloat() ?: 1f)
+    val priceMax = remember(state.chargers) {
+        (state.chargers.mapNotNull { it.pricePerKwh }.filter { it > 0 }.maxOrNull()?.toFloat() ?: 1f)
             .coerceAtLeast(0.5f)
     }
     val priceMin = 0f
@@ -340,7 +314,7 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
 }
 
 @Composable
-private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = false, currencySymbol: String = "€", session: ChargeSession? = null, distanceMiles: Double? = null, onShowOnMap: (() -> Unit)? = null) {
+private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€", session: ChargeSession? = null, distanceMiles: Double? = null, onShowOnMap: (() -> Unit)? = null) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -352,34 +326,11 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                 verticalAlignment = Alignment.Top
             ) {
                 Column(Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            charger.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (showSourceBadge) {
-                            val (badgeText, badgeColor) = when (charger.sourceDisplay) {
-                                DataSource.OCM -> "OCM" to Color(0xFF1565C0)
-                                else -> "EV" to Color(0xFF2E7D32)
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .background(badgeColor.copy(alpha = 0.15f), shape = MaterialTheme.shapes.extraSmall)
-                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    badgeText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = badgeColor,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        charger.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text(
                         charger.operator.name,
                         style = MaterialTheme.typography.bodySmall,
@@ -508,19 +459,17 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                     Spacer(Modifier.width(4.dp))
                     Text("Google Maps", style = MaterialTheme.typography.labelSmall)
                 }
-                if (charger.sourceDisplay == DataSource.ELECTROVERSE) {
-                    charger.externalId?.let { extId ->
-                        TextButton(
-                            onClick = {
-                                val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=$extId")
-                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Electroverse", style = MaterialTheme.typography.labelSmall)
-                        }
+                charger.externalId?.let { extId ->
+                    TextButton(
+                        onClick = {
+                            val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=$extId")
+                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Electroverse", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
