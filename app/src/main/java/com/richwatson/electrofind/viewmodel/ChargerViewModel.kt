@@ -40,6 +40,10 @@ data class SearchState(
     val connectorFilter: String = "ALL",
     val minPriceKwh: Double? = null,
     val maxPriceKwh: Double? = null,
+    val minOptimalCost: Double? = null,
+    val maxOptimalCost: Double? = null,
+    val minStayCost: Double? = null,
+    val maxStayCost: Double? = null,
     val currencySymbol: String = "€",
     val loadingStatus: String = "",
     val fetchProgress: Float = 0f,
@@ -109,6 +113,10 @@ class ChargerViewModel(
 
             s.minPriceKwh?.let { min -> list = list.filter { (it.pricePerKwh ?: 0.0) >= min } }
             s.maxPriceKwh?.let { max -> list = list.filter { (it.pricePerKwh ?: 0.0) <= max } }
+            s.minOptimalCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, null) ?: 0.0) >= min } }
+            s.maxOptimalCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, null) ?: Double.MAX_VALUE) <= max } }
+            s.minStayCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: 0.0) >= min } }
+            s.maxStayCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: Double.MAX_VALUE) <= max } }
 
             list = when (s.sortOrder) {
                 SortOrder.PRICE_ASC -> list.sortedBy { it.pricePerKwh ?: Double.MAX_VALUE }
@@ -249,6 +257,17 @@ class ChargerViewModel(
     fun setPriceFilter(min: Double?, max: Double?) {
         _state.update { it.copy(minPriceKwh = min, maxPriceKwh = max) }
     }
+
+    fun setOptimalCostFilter(min: Double?, max: Double?) {
+        _state.update { it.copy(minOptimalCost = min, maxOptimalCost = max) }
+    }
+
+    fun setStayCostFilter(min: Double?, max: Double?) {
+        _state.update { it.copy(minStayCost = min, maxStayCost = max) }
+    }
+
+    fun optimalCostFor(charger: ChargingLocation): Double? = charger.simCost(_state.value, null)
+    fun stayCostFor(charger: ChargingLocation): Double? = charger.simCost(_state.value, _state.value.stayMinutes.toDouble())
 
     fun setConnectorFilter(connector: String) {
         _state.update { it.copy(connectorFilter = connector) }

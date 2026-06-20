@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -90,10 +91,8 @@ fun ResultsScreen(
                 }
             }
             if (showFilters) {
-                FilterBar(chargerViewModel)
-                HorizontalDivider()
-            }
-            if (state.isLoading && chargers.isEmpty()) {
+                FilterBar(chargerViewModel, modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()))
+            } else if (state.isLoading && chargers.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -150,7 +149,7 @@ fun ResultsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
+internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsState()
     val filtered = remember(state) { vm.filteredSortedChargers }
 
@@ -165,6 +164,19 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
         )
     }
 
+    val optimalCostMax = remember(state.chargers, state.startSocPercent, state.targetSocPercent) {
+        state.chargers.mapNotNull { vm.optimalCostFor(it) }.filter { it > 0 }.maxOrNull()?.toFloat() ?: 0f
+    }
+    val stayCostMax = remember(state.chargers, state.startSocPercent, state.targetSocPercent, state.stayMinutes) {
+        state.chargers.mapNotNull { vm.stayCostFor(it) }.filter { it > 0 }.maxOrNull()?.toFloat() ?: 0f
+    }
+    var optSliderRange by remember(state.minOptimalCost, state.maxOptimalCost, optimalCostMax) {
+        mutableStateOf((state.minOptimalCost?.toFloat() ?: 0f)..(state.maxOptimalCost?.toFloat() ?: optimalCostMax))
+    }
+    var staySliderRange by remember(state.minStayCost, state.maxStayCost, stayCostMax) {
+        mutableStateOf((state.minStayCost?.toFloat() ?: 0f)..(state.maxStayCost?.toFloat() ?: stayCostMax))
+    }
+
     val nearestMi = remember(filtered, state.searchLat, state.searchLng) {
         if (state.searchLat == 0.0 && state.searchLng == 0.0) null
         else filtered.minOfOrNull {
@@ -172,11 +184,7 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
         }
     }
 
-    var localStartSoc by remember(state.startSocPercent) { mutableIntStateOf(state.startSocPercent) }
-    var localTargetSoc by remember(state.targetSocPercent) { mutableIntStateOf(state.targetSocPercent) }
-    var localStayMins by remember(state.stayMinutes) { mutableIntStateOf(state.stayMinutes) }
-
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         if (showSort) {
             Text("Sort by", style = MaterialTheme.typography.labelMedium)
             Row(
@@ -255,61 +263,57 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.height(6.dp))
-        Text("Charge session", style = MaterialTheme.typography.labelMedium)
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Current SoC", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("$localStartSoc%", style = MaterialTheme.typography.labelSmall)
-        }
-        Slider(
-            value = localStartSoc.toFloat(),
-            onValueChange = { localStartSoc = it.toInt() },
-            onValueChangeFinished = { vm.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
-            valueRange = 0f..100f,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
-        )
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Target SoC", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("$localTargetSoc%", style = MaterialTheme.typography.labelSmall)
-        }
-        Slider(
-            value = localTargetSoc.toFloat(),
-            onValueChange = { localTargetSoc = it.toInt() },
-            onValueChangeFinished = { vm.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
-            valueRange = 0f..100f,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
-        )
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Stay time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                when {
-                    localStayMins < 60 -> "$localStayMins min"
-                    localStayMins % 60 == 0 -> "${localStayMins / 60} hr"
-                    else -> "${localStayMins / 60}h ${localStayMins % 60}m"
+        if (optimalCostMax > 0f) {
+            Spacer(Modifier.height(6.dp))
+            Text("Optimal cost (${state.currencySymbol})", style = MaterialTheme.typography.labelMedium)
+            RangeSlider(
+                value = optSliderRange,
+                onValueChange = { optSliderRange = it },
+                onValueChangeFinished = {
+                    val min = if (optSliderRange.start <= 0.005f) null else optSliderRange.start.toDouble()
+                    val max = if (optSliderRange.endInclusive >= optimalCostMax - 0.005f) null else optSliderRange.endInclusive.toDouble()
+                    vm.setOptimalCostFilter(min, max)
                 },
-                style = MaterialTheme.typography.labelSmall
+                valueRange = 0f..optimalCostMax,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
             )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    if (optSliderRange.start <= 0.005f) "Any min" else "${state.currencySymbol}${"%.2f".format(optSliderRange.start)}",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    if (optSliderRange.endInclusive >= optimalCostMax - 0.005f) "Any max" else "${state.currencySymbol}${"%.2f".format(optSliderRange.endInclusive)}",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-        Slider(
-            value = localStayMins.toFloat(),
-            onValueChange = { localStayMins = it.toInt() },
-            onValueChangeFinished = { vm.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
-            valueRange = 0f..720f,
-            steps = 143,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
-        )
+        if (stayCostMax > 0f) {
+            Spacer(Modifier.height(6.dp))
+            Text("Stay cost (${state.currencySymbol})", style = MaterialTheme.typography.labelMedium)
+            RangeSlider(
+                value = staySliderRange,
+                onValueChange = { staySliderRange = it },
+                onValueChangeFinished = {
+                    val min = if (staySliderRange.start <= 0.005f) null else staySliderRange.start.toDouble()
+                    val max = if (staySliderRange.endInclusive >= stayCostMax - 0.005f) null else staySliderRange.endInclusive.toDouble()
+                    vm.setStayCostFilter(min, max)
+                },
+                valueRange = 0f..stayCostMax,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    if (staySliderRange.start <= 0.005f) "Any min" else "${state.currencySymbol}${"%.2f".format(staySliderRange.start)}",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    if (staySliderRange.endInclusive >= stayCostMax - 0.005f) "Any max" else "${state.currencySymbol}${"%.2f".format(staySliderRange.endInclusive)}",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
     }
 }
 

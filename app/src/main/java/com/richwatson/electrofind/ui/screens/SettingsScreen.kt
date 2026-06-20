@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.preferences.AppPreferences
@@ -21,6 +22,9 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val state by chargerViewModel.state.collectAsState()
+    var localStartSoc by remember(state.startSocPercent) { mutableIntStateOf(state.startSocPercent) }
+    var localTargetSoc by remember(state.targetSocPercent) { mutableIntStateOf(state.targetSocPercent) }
+    var localStayMins by remember(state.stayMinutes) { mutableIntStateOf(state.stayMinutes) }
 
     Scaffold(
         topBar = {
@@ -51,6 +55,63 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            HorizontalDivider()
+
+            Text("Charge session", style = MaterialTheme.typography.titleMedium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Current SoC", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("$localStartSoc%", style = MaterialTheme.typography.bodyMedium)
+            }
+            Slider(
+                value = localStartSoc.toFloat(),
+                onValueChange = { localStartSoc = it.toInt() },
+                onValueChangeFinished = { chargerViewModel.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
+                valueRange = 0f..100f,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Target SoC", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("$localTargetSoc%", style = MaterialTheme.typography.bodyMedium)
+            }
+            Slider(
+                value = localTargetSoc.toFloat(),
+                onValueChange = { localTargetSoc = it.toInt() },
+                onValueChangeFinished = { chargerViewModel.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
+                valueRange = 0f..100f,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Stay time", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    when {
+                        localStayMins < 60 -> "$localStayMins min"
+                        localStayMins % 60 == 0 -> "${localStayMins / 60} hr"
+                        else -> "${localStayMins / 60}h ${localStayMins % 60}m"
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Slider(
+                value = localStayMins.toFloat(),
+                onValueChange = { localStayMins = it.toInt() },
+                onValueChangeFinished = { chargerViewModel.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
+                valueRange = 0f..720f,
+                steps = 143,
+                modifier = Modifier.fillMaxWidth()
+            )
 
             HorizontalDivider()
 

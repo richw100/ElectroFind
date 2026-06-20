@@ -12,6 +12,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +27,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -89,7 +92,7 @@ fun BrowseMapScreen(
     initialLat: Double,
     initialLng: Double,
     chargerViewModel: ChargerViewModel,
-    onLocationSelected: (Double, Double) -> Unit,
+    onLocationSelected: (Double, Double, String?) -> Unit,
     onBack: () -> Unit
 ) {
     val state by chargerViewModel.state.collectAsState()
@@ -170,11 +173,10 @@ fun BrowseMapScreen(
                         keyboardActions = KeyboardActions(onSearch = {
                             val top = suggestions.firstOrNull()
                             if (top != null) {
-                                searchText = top.primaryName
                                 suggestionsExpanded = false
                                 chargerViewModel.clearSuggestions()
                                 keyboardController?.hide()
-                                pendingCenter = GeoPoint(top.lat, top.lng)
+                                onLocationSelected(top.lat, top.lng, top.primaryName)
                             } else {
                                 chargerViewModel.fetchSuggestions(searchText)
                                 suggestionsExpanded = true
@@ -184,11 +186,10 @@ fun BrowseMapScreen(
                             IconButton(onClick = {
                                 val top = suggestions.firstOrNull()
                                 if (top != null) {
-                                    searchText = top.primaryName
                                     suggestionsExpanded = false
                                     chargerViewModel.clearSuggestions()
                                     keyboardController?.hide()
-                                    pendingCenter = GeoPoint(top.lat, top.lng)
+                                    onLocationSelected(top.lat, top.lng, top.primaryName)
                                 } else {
                                     chargerViewModel.fetchSuggestions(searchText)
                                     suggestionsExpanded = true
@@ -206,11 +207,10 @@ fun BrowseMapScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            searchText = suggestion.primaryName
                                             suggestionsExpanded = false
                                             chargerViewModel.clearSuggestions()
                                             keyboardController?.hide()
-                                            pendingCenter = GeoPoint(suggestion.lat, suggestion.lng)
+                                            onLocationSelected(suggestion.lat, suggestion.lng, suggestion.primaryName)
                                         }
                                         .padding(horizontal = 16.dp, vertical = 10.dp)
                                 ) {
@@ -234,9 +234,8 @@ fun BrowseMapScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            searchText = entry.label
                                             keyboardController?.hide()
-                                            pendingCenter = GeoPoint(entry.lat, entry.lng)
+                                            onLocationSelected(entry.lat, entry.lng, entry.label)
                                         }
                                         .padding(start = 16.dp, end = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -323,19 +322,19 @@ fun ResultsMapScreen(
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
                 },
-                onLocationSelected = { lat, lng ->
-                    chargerViewModel.searchByCoordinates(lat, lng)
+                onLocationSelected = { lat, lng, label ->
+                    chargerViewModel.searchByCoordinates(lat, lng, label = label, reverseGeocodePrefix = if (label == null) "Map pin" else null)
                 }
             )
             if (showFilters) {
-                Card(
+                FilterBar(
+                    chargerViewModel,
+                    showSort = false,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopCenter),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
-                    FilterBar(chargerViewModel, showSort = false)
-                }
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .verticalScroll(rememberScrollState())
+                )
             }
         }
     }
@@ -358,7 +357,7 @@ fun ChargerMapView(
     selectedChargerPk: Long? = null,
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
-    onLocationSelected: ((Double, Double) -> Unit)? = null
+    onLocationSelected: ((Double, Double, String?) -> Unit)? = null
 ) {
     val context = LocalContext()
     var dialogCharger by remember { mutableStateOf<ChargingLocation?>(null) }
@@ -422,7 +421,7 @@ fun ChargerMapView(
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 setOnMarkerClickListener { marker, _ ->
                     if (marker.isInfoWindowShown) {
-                        onLocationSelected?.invoke(myLoc.latitude, myLoc.longitude)
+                        onLocationSelected?.invoke(myLoc.latitude, myLoc.longitude, null)
                         marker.closeInfoWindow()
                     } else {
                         marker.showInfoWindow()
@@ -433,21 +432,39 @@ fun ChargerMapView(
             mapView.overlays.add(myMarker)
         }
 
-        chargers.forEach { charger ->
-            val kw = charger.maxKilowatts
-            val price = charger.pricePerKwh
-            val badgeLabel: String? = when {
-                priceMode == MapPriceMode.OPTIMAL_COST && session != null && kw != null && price != null -> {
+        // First pass: compute session costs for colour normalisation
+        val sessionCosts: List<Double?> = chargers.map { charger ->
+            val kw = charger.maxKilowatts ?: return@map null
+            val price = charger.pricePerKwh ?: return@map null
+            if (session == null) return@map null
+            when (priceMode) {
+                MapPriceMode.OPTIMAL_COST -> {
                     val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
-                    val cost = KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes)
-                    "%s%.2f".format(currencySymbol, cost)
+                    KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes)
                 }
-                priceMode == MapPriceMode.STAY_COST && session != null && kw != null && price != null -> {
+                MapPriceMode.STAY_COST -> {
                     val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
-                    val cost = KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
-                    "%s%.2f".format(currencySymbol, cost)
+                    KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
                 }
                 else -> null
+            }
+        }
+        val paidCosts = sessionCosts.filterNotNull().filter { it > 0.0 }
+        val minSessionCost = paidCosts.minOrNull()
+        val maxSessionCost = paidCosts.maxOrNull()
+
+        // Second pass: create markers
+        chargers.forEachIndexed { idx, charger ->
+            val sessionCost = sessionCosts[idx]
+            val badgeLabel: String? = sessionCost?.let { "%s%.2f".format(currencySymbol, it) }
+            val colorFraction: Float? = when {
+                sessionCost == null -> null
+                sessionCost <= 0.0 -> 0f
+                minSessionCost == null || maxSessionCost == null || maxSessionCost <= minSessionCost -> null
+                else -> {
+                    val raw = ((sessionCost - minSessionCost) / (maxSessionCost - minSessionCost)).toFloat().coerceIn(0f, 1f)
+                    Math.pow(raw.toDouble(), 1.5).toFloat()
+                }
             }
             val marker = Marker(mapView).apply {
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
@@ -457,7 +474,7 @@ fun ChargerMapView(
                     append(charger.operator.name)
                     append(if (charger.hasAvailableEvse) " · Available" else " · In use")
                 }
-                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, currencySymbol = currencySymbol, labelOverride = badgeLabel, isSelected = charger.pk == selectedChargerPk)
+                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, currencySymbol = currencySymbol, labelOverride = badgeLabel, isSelected = charger.pk == selectedChargerPk, colorFraction = colorFraction)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
                     dialogCharger = charger
@@ -470,7 +487,7 @@ fun ChargerMapView(
             mapView.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
                 override fun singleTapConfirmedHelper(p: GeoPoint) = false
                 override fun longPressHelper(p: GeoPoint): Boolean {
-                    onLocationSelected(p.latitude, p.longitude)
+                    onLocationSelected(p.latitude, p.longitude, null)
                     return true
                 }
             }))
@@ -676,19 +693,32 @@ private fun myLocationDrawable(context: Context): Drawable {
 @Composable
 private fun LocalContext() = androidx.compose.ui.platform.LocalContext.current
 
-private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, currencySymbol: String = "€", labelOverride: String? = null, isSelected: Boolean = false): Drawable {
+private fun lerpColor(a: Int, b: Int, t: Float): Int {
+    val f = t.coerceIn(0f, 1f)
+    return android.graphics.Color.rgb(
+        (android.graphics.Color.red(a) + (android.graphics.Color.red(b) - android.graphics.Color.red(a)) * f).toInt(),
+        (android.graphics.Color.green(a) + (android.graphics.Color.green(b) - android.graphics.Color.green(a)) * f).toInt(),
+        (android.graphics.Color.blue(a) + (android.graphics.Color.blue(b) - android.graphics.Color.blue(a)) * f).toInt()
+    )
+}
+
+private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, currencySymbol: String = "€", labelOverride: String? = null, isSelected: Boolean = false, colorFraction: Float? = null): Drawable {
     val dp = context.resources.displayMetrics.density
     val border = if (isSelected) (3 * dp) else 0f
     val w = (68 * dp).toInt() + (border * 2).toInt()
     val h = (32 * dp).toInt() + (border * 2).toInt()
     val r = 8 * dp
 
+    val green = android.graphics.Color.rgb(46, 125, 50)
+    val orange = android.graphics.Color.rgb(230, 119, 0)
+    val red = android.graphics.Color.rgb(183, 28, 28)
     val bgColor = when {
+        colorFraction != null -> if (colorFraction < 0.5f) lerpColor(green, orange, colorFraction * 2f) else lerpColor(orange, red, (colorFraction - 0.5f) * 2f)
         price == null -> android.graphics.Color.rgb(100, 100, 100)
         price == 0.0 -> android.graphics.Color.rgb(27, 94, 32)
-        price < 0.35 -> android.graphics.Color.rgb(46, 125, 50)
-        price < 0.55 -> android.graphics.Color.rgb(230, 119, 0)
-        else -> android.graphics.Color.rgb(183, 28, 28)
+        price < 0.35 -> green
+        price < 0.55 -> orange
+        else -> red
     }
 
     val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
