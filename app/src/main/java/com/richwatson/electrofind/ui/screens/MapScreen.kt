@@ -315,7 +315,7 @@ fun ResultsMapScreen(
                 initialCenter = initialCenter,
                 radiusMiles = state.searchRadiusMiles,
                 currencySymbol = state.currencySymbol,
-                session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes),
+                session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes, state.activeProfile),
                 priceMode = priceMode,
                 selectedChargerPk = state.selectedChargerPk,
                 modifier = Modifier.fillMaxSize(),
@@ -439,11 +439,11 @@ fun ChargerMapView(
             if (session == null) return@map null
             when (priceMode) {
                 MapPriceMode.OPTIMAL_COST -> {
-                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
                     KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes)
                 }
                 MapPriceMode.STAY_COST -> {
-                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
                     KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
                 }
                 else -> null
@@ -578,9 +578,9 @@ fun ChargerMapView(
                     val kw = charger.maxKilowatts
                     val price = charger.pricePerKwh
                     if (session != null && kw != null && price != null) {
-                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
                         val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
-                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
                         val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
                         val optMins = optResult.chargeMinutes.toInt()
                         val optSoc = optResult.endSocPercent.toInt()

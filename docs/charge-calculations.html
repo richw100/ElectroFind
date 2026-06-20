@@ -22,7 +22,7 @@
 <body>
 
 <h1>ElectroFind — Charge &amp; Cost Calculations</h1>
-<p>This document describes how ElectroFind estimates charging time and cost for a Hyundai Kona Electric (Long Range, 77.4 kWh usable battery).</p>
+<p>This document describes how ElectroFind estimates charging time and cost for a Hyundai Kona Electric (Long Range, 65.4 kWh usable battery).</p>
 
 <hr>
 
@@ -92,7 +92,7 @@
 <ol>
   <li>
     <strong>Energy per step</strong> — fixed, regardless of charger speed:
-    <div class="formula">energyPerStep = 77.4 kWh × 0.001 = 0.0774 kWh</div>
+    <div class="formula">energyPerStep = 65.4 kWh × 0.001 = 0.0654 kWh</div>
   </li>
   <li>
     <strong>Effective power</strong> — the lower of what the charger can deliver and what the car will accept:
@@ -181,7 +181,7 @@
 
 <h2>6. Limitations</h2>
 <ul>
-  <li>The charge curve is specific to the <strong>Hyundai Kona Electric Long Range (77.4 kWh)</strong>. Other vehicles will charge differently.</li>
+  <li>The charge curve is specific to the <strong>Hyundai Kona Electric Long Range (65.4 kWh)</strong>. Other vehicles will charge differently.</li>
   <li>The curve was measured under nominal conditions. Cold batteries charge more slowly; very hot batteries may also throttle.</li>
   <li>Efficiency figures (95% DC / 88% AC) are typical values. Actual efficiency varies by charger, cable, and temperature.</li>
   <li>The simulation does not model pre-conditioning, cell balancing pauses, or network-imposed power limits.</li>

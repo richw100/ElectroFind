@@ -1,6 +1,7 @@
 package com.richwatson.electrofind.preferences
 
 import android.content.Context
+import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.viewmodel.ThemeMode
 
 class AppPreferences(context: Context) {
@@ -41,6 +42,10 @@ class AppPreferences(context: Context) {
     var stayMinutes: Int
         get() = prefs.getInt("stay_minutes", 30)
         set(value) { prefs.edit().putInt("stay_minutes", value).apply() }
+
+    var activeProfileId: String
+        get() = prefs.getString("active_profile_id", CarProfile.KONA_LR_ID) ?: CarProfile.KONA_LR_ID
+        set(value) { prefs.edit().putString("active_profile_id", value).apply() }
 
     var rawSearchHistory: String
         get() = prefs.getString("search_history", "") ?: ""

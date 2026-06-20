@@ -1,7 +1,9 @@
 package com.richwatson.electrofind.util
 
+import com.richwatson.electrofind.model.CarProfile
+
 object KonaChargeCurve {
-    const val BATTERY_KWH = 77.4
+    const val BATTERY_KWH = 65.4
 
     // (SoC%, kW) pairs extracted from kona-charge-curve.svg
     private val curve = floatArrayOf(
@@ -129,20 +131,21 @@ object KonaChargeCurve {
         startSoc: Float,
         targetSoc: Float,
         chargerMaxKw: Double,
-        stayMinutes: Double? = null
+        stayMinutes: Double? = null,
+        profile: CarProfile = CarProfile.KONA_LR
     ): SimResult {
         if (chargerMaxKw <= 0.0 || startSoc >= targetSoc) {
             return SimResult(startSoc, 0.0, 0.0, 0.0, startSoc >= targetSoc)
         }
         val efficiency = if (chargerMaxKw >= 22.0) 0.95 else 0.88
         val step = 0.1f
-        val energyPerStep = BATTERY_KWH * (step / 100.0)
+        val energyPerStep = profile.batteryKwh * (step / 100.0)
         var soc = startSoc
         var totalEnergy = 0.0
         var totalMinutes = 0.0
 
         while (soc < targetSoc) {
-            val effectiveKw = minOf(chargerMaxKw, powerAtSoc(soc).toDouble())
+            val effectiveKw = minOf(chargerMaxKw, profile.powerAtSoc(soc).toDouble())
             if (effectiveKw <= 0.0) break
             val timeStep = (energyPerStep / (effectiveKw * efficiency)) * 60.0
             if (stayMinutes != null && totalMinutes + timeStep > stayMinutes) {

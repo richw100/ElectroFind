@@ -2,6 +2,8 @@ package com.richwatson.electrofind.viewmodel
 
 import android.app.Application
 import android.location.Geocoder
+import com.richwatson.electrofind.model.CarProfile
+import com.richwatson.electrofind.repository.CarProfileRepository
 import com.richwatson.electrofind.util.KonaChargeCurve
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -56,7 +58,9 @@ data class SearchState(
     val targetSocPercent: Int = 80,
     val stayMinutes: Int = 30,
     val searchHistory: List<SearchHistoryEntry> = emptyList(),
-    val selectedChargerPk: Long? = null
+    val selectedChargerPk: Long? = null,
+    val activeProfile: CarProfile = CarProfile.KONA_LR,
+    val profiles: List<CarProfile> = listOf(CarProfile.KONA_LR)
 ) {
     val isLoading: Boolean get() = isLoadingEv
 }
@@ -64,7 +68,8 @@ data class SearchState(
 class ChargerViewModel(
     private val repository: ChargerRepository,
     private val appPreferences: AppPreferences,
-    private val application: Application
+    private val application: Application,
+    private val carProfileRepository: CarProfileRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchState())
@@ -80,6 +85,10 @@ class ChargerViewModel(
     private var suggestionsJob: Job? = null
 
     init {
+        val savedProfiles = carProfileRepository.loadAll()
+        val allProfiles = listOf(CarProfile.KONA_LR) + savedProfiles
+        val activeId = appPreferences.activeProfileId
+        val activeProfile = allProfiles.find { it.id == activeId } ?: CarProfile.KONA_LR
         _state.update {
             it.copy(
                 searchRadiusMiles = appPreferences.searchRadiusMiles,
@@ -90,7 +99,9 @@ class ChargerViewModel(
                 startSocPercent = appPreferences.startSocPercent,
                 targetSocPercent = appPreferences.targetSocPercent,
                 stayMinutes = appPreferences.stayMinutes,
-                searchHistory = loadSearchHistory()
+                searchHistory = loadSearchHistory(),
+                profiles = allProfiles,
+                activeProfile = activeProfile
             )
         }
     }
@@ -289,6 +300,33 @@ class ChargerViewModel(
         _state.update { it.copy(chargers = emptyList(), error = null, isLoadingEv = false) }
     }
 
+    fun loadProfiles() {
+        val saved = carProfileRepository.loadAll()
+        val all = listOf(CarProfile.KONA_LR) + saved
+        val activeId = appPreferences.activeProfileId
+        val active = all.find { it.id == activeId } ?: CarProfile.KONA_LR
+        _state.update { it.copy(profiles = all, activeProfile = active) }
+    }
+
+    fun setActiveProfile(id: String) {
+        val profile = _state.value.profiles.find { it.id == id } ?: return
+        appPreferences.activeProfileId = id
+        _state.update { it.copy(activeProfile = profile) }
+    }
+
+    fun saveProfile(profile: CarProfile) {
+        carProfileRepository.save(profile)
+        loadProfiles()
+        setActiveProfile(profile.id)
+    }
+
+    fun deleteProfile(id: String) {
+        if (id == CarProfile.KONA_LR_ID) return
+        carProfileRepository.delete(id)
+        loadProfiles()
+        if (appPreferences.activeProfileId == id) setActiveProfile(CarProfile.KONA_LR_ID)
+    }
+
     private fun loadSearchHistory(): List<SearchHistoryEntry> {
         val raw = appPreferences.rawSearchHistory
         if (raw.isEmpty()) return emptyList()
@@ -363,7 +401,8 @@ private fun ChargingLocation.simCost(state: SearchState, stayMinutes: Double?): 
         state.startSocPercent.toFloat(),
         state.targetSocPercent.toFloat(),
         kw,
-        stayMinutes
+        stayMinutes,
+        profile = state.activeProfile
     )
     return KonaChargeCurve.totalCost(
         result = result,

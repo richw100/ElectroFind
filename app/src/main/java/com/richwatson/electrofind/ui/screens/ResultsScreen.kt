@@ -29,12 +29,13 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import com.richwatson.electrofind.viewmodel.SortOrder
 import com.richwatson.electrofind.viewmodel.SpeedFilter
 
-data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes: Int)
+data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes: Int, val profile: CarProfile = CarProfile.KONA_LR)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,7 +137,7 @@ fun ResultsScreen(
                         ChargerCard(
                             charger = charger,
                             currencySymbol = state.currencySymbol,
-                            session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes),
+                            session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes, state.activeProfile),
                             distanceMiles = distanceMiles,
                             onShowOnMap = { onShowOnMap(charger) }
                         )
@@ -410,9 +411,9 @@ private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€
             val kw = charger.maxKilowatts
             val price = charger.pricePerKwh
             if (session != null && kw != null && price != null) {
-                val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
                 val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
-                val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
                 val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
                 Spacer(Modifier.height(4.dp))
                 val optMins = optResult.chargeMinutes.toInt()

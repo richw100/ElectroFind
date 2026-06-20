@@ -25,6 +25,7 @@ fun SettingsScreen(
     var localStartSoc by remember(state.startSocPercent) { mutableIntStateOf(state.startSocPercent) }
     var localTargetSoc by remember(state.targetSocPercent) { mutableIntStateOf(state.targetSocPercent) }
     var localStayMins by remember(state.stayMinutes) { mutableIntStateOf(state.stayMinutes) }
+    var profileDropdownExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -112,6 +113,49 @@ fun SettingsScreen(
                 steps = 143,
                 modifier = Modifier.fillMaxWidth()
             )
+
+            HorizontalDivider()
+
+            Text("Car profile", style = MaterialTheme.typography.titleMedium)
+            if (state.profiles.size > 1) {
+                ExposedDropdownMenuBox(
+                    expanded = profileDropdownExpanded,
+                    onExpandedChange = { profileDropdownExpanded = !profileDropdownExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = state.activeProfile.name,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = profileDropdownExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = profileDropdownExpanded,
+                        onDismissRequest = { profileDropdownExpanded = false }
+                    ) {
+                        state.profiles.forEach { profile ->
+                            DropdownMenuItem(
+                                text = { Text(profile.name) },
+                                onClick = {
+                                    chargerViewModel.setActiveProfile(profile.id)
+                                    profileDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    state.activeProfile.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Upload a charge curve SVG on the Curve tab to add more cars",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             HorizontalDivider()
 

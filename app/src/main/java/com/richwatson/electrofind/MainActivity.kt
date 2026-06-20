@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
     private val chargerViewModel: ChargerViewModel by lazy {
         val app = application as ElectroFindApp
         ViewModelProvider(this, factory {
-            ChargerViewModel(app.repository, app.appPreferences, app)
+            ChargerViewModel(app.repository, app.appPreferences, app, app.carProfileRepository)
         })[ChargerViewModel::class.java]
     }
 
