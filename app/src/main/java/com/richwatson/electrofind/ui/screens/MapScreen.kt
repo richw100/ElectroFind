@@ -461,10 +461,7 @@ fun ChargerMapView(
                 sessionCost == null -> null
                 sessionCost <= 0.0 -> 0f
                 minSessionCost == null || maxSessionCost == null || maxSessionCost <= minSessionCost -> null
-                else -> {
-                    val raw = ((sessionCost - minSessionCost) / (maxSessionCost - minSessionCost)).toFloat().coerceIn(0f, 1f)
-                    Math.pow(raw.toDouble(), 1.5).toFloat()
-                }
+                else -> ((sessionCost - minSessionCost) / (maxSessionCost - minSessionCost)).toFloat().coerceIn(0f, 1f)
             }
             val marker = Marker(mapView).apply {
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
