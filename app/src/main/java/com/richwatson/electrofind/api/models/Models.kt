@@ -121,6 +121,30 @@ data class ChargingLocation(
         return evses.edges.any { it.node.status == "AVAILABLE" }
     }
 
+    val connectorPriceSummaries: List<ConnectorPriceSummary> get() {
+        return evses.edges
+            .flatMap { it.node.connectors.edges.map { e -> e.node } }
+            .groupBy { connector ->
+                Triple(
+                    connector.standard?.humanName ?: "Unknown",
+                    connector.kilowatts,
+                    connector.priceComponents.firstOrNull { it.type == "ConsumptionRate" }
+                        ?.let { it.unitAmount?.toDouble()?.div(it.currencyDetails?.minorUnitConversion ?: 100) }
+                )
+            }
+            .map { (key, connectors) ->
+                val (type, kw, price) = key
+                ConnectorPriceSummary(
+                    type = type,
+                    kilowatts = kw,
+                    pricePerKwh = price,
+                    isFree = connectors.first().isChargingFree,
+                    count = connectors.size
+                )
+            }
+            .sortedByDescending { it.kilowatts ?: 0.0 }
+    }
+
     companion object {
         const val STALE_MS = 7 * 24 * 3600_000L
     }
@@ -175,6 +199,14 @@ data class CurrencyDetails(
     val symbol: String,
     val decimalDigits: Int,
     val minorUnitConversion: Int
+)
+
+data class ConnectorPriceSummary(
+    val type: String,
+    val kilowatts: Double?,
+    val pricePerKwh: Double?,
+    val isFree: Boolean,
+    val count: Int
 )
 
 data class ConnectorStandard(

@@ -563,8 +563,21 @@ fun ChargerMapView(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    charger.pricePerKwh?.let {
-                        Text("%s%.2f/kWh".format(currencySymbol, it), style = MaterialTheme.typography.bodyMedium)
+                    charger.connectorPriceSummaries.forEach { summary ->
+                        val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
+                        val kwLabel = summary.kilowatts?.let { kw ->
+                            if (kw % 1.0 == 0.0) "${kw.toInt()} kW" else "%.1f kW".format(kw)
+                        } ?: ""
+                        val priceLabel = when {
+                            summary.isFree -> "Free"
+                            summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
+                            else -> "—"
+                        }
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(typeLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                            Text(kwLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(64.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                            Text(priceLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(88.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                        }
                     }
                     charger.connectionFeeMajor?.let {
                         Text("+ %s%.2f connection fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

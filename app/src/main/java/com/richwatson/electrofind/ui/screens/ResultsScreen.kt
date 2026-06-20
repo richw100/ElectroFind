@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -213,12 +214,23 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true, modifier:
             }
         }
         Spacer(Modifier.height(6.dp))
+        Text("Max speed", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(null to "Any", 7.0 to "7 kW", 22.0 to "22 kW", 50.0 to "50 kW", 150.0 to "150 kW").forEach { (kw, label) ->
+                FilterChip(
+                    selected = state.maxSpeedKw == kw,
+                    onClick = { vm.setMaxSpeedFilter(kw) },
+                    label = { Text(label) }
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
         Text("Connector", style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("ALL", "CCS", "Type 2", "CHAdeMO").forEach { connector ->
+            listOf("CCS", "Type 2", "CHAdeMO").forEach { connector ->
                 FilterChip(
-                    selected = state.connectorFilter == connector,
-                    onClick = { vm.setConnectorFilter(connector) },
+                    selected = connector in state.connectorFilters,
+                    onClick = { vm.toggleConnectorFilter(connector) },
                     label = { Text(connector) }
                 )
             }
@@ -354,10 +366,9 @@ private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€
                         )
                     }
                 }
-                PriceBadge(charger, currencySymbol)
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val availColor = if (charger.hasAvailableEvse) Color(0xFF2E7D32) else Color(0xFFB71C1C)
@@ -373,18 +384,11 @@ private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€
                         label = { Text("${"%.1f".format(d)} mi", style = MaterialTheme.typography.labelSmall) }
                     )
                 }
-                charger.maxKilowatts?.let { kw ->
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("${kw.toInt()} kW", style = MaterialTheme.typography.labelSmall) }
-                    )
-                }
-                charger.connectorTypes.forEach { ct ->
-                    AssistChip(
-                        onClick = {},
-                        label = { Text(ct, style = MaterialTheme.typography.labelSmall) }
-                    )
-                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+            charger.connectorPriceSummaries.forEach { summary ->
+                ConnectorPriceRow(summary, currencySymbol)
             }
 
             charger.connectionFeeMajor?.let { fee ->
@@ -479,6 +483,24 @@ private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ConnectorPriceRow(summary: com.richwatson.electrofind.api.models.ConnectorPriceSummary, currencySymbol: String) {
+    val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
+    val kwLabel = summary.kilowatts?.let { kw ->
+        if (kw % 1.0 == 0.0) "${kw.toInt()} kW" else "%.1f kW".format(kw)
+    } ?: ""
+    val priceLabel = when {
+        summary.isFree -> "Free"
+        summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
+        else -> "—"
+    }
+    Row(Modifier.fillMaxWidth()) {
+        Text(typeLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+        Text(kwLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(64.dp), textAlign = TextAlign.End)
+        Text(priceLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(84.dp), textAlign = TextAlign.End)
     }
 }
 

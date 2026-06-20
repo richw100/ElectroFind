@@ -39,7 +39,8 @@ data class SearchState(
     val searchLng: Double = 0.0,
     val sortOrder: SortOrder = SortOrder.PRICE_ASC,
     val speedFilter: SpeedFilter = SpeedFilter.ALL,
-    val connectorFilter: String = "ALL",
+    val connectorFilters: Set<String> = emptySet(),
+    val maxSpeedKw: Double? = null,
     val minPriceKwh: Double? = null,
     val maxPriceKwh: Double? = null,
     val minOptimalCost: Double? = null,
@@ -116,9 +117,12 @@ class ChargerViewModel(
                 SpeedFilter.RAPID -> list.filter { it.maxKilowatts?.let { kw -> kw >= 22 } == true }
                 SpeedFilter.ULTRA -> list.filter { it.maxKilowatts?.let { kw -> kw >= 100 } == true }
             }
-            if (s.connectorFilter != "ALL") {
+            s.maxSpeedKw?.let { max -> list = list.filter { (it.maxKilowatts ?: 0.0) <= max } }
+            if (s.connectorFilters.isNotEmpty()) {
                 list = list.filter { charger ->
-                    charger.connectorTypes.any { it.contains(s.connectorFilter, ignoreCase = true) }
+                    charger.connectorTypes.any { ct ->
+                        s.connectorFilters.any { f -> ct.contains(f, ignoreCase = true) }
+                    }
                 }
             }
 
@@ -280,8 +284,16 @@ class ChargerViewModel(
     fun optimalCostFor(charger: ChargingLocation): Double? = charger.simCost(_state.value, null)
     fun stayCostFor(charger: ChargingLocation): Double? = charger.simCost(_state.value, _state.value.stayMinutes.toDouble())
 
-    fun setConnectorFilter(connector: String) {
-        _state.update { it.copy(connectorFilter = connector) }
+    fun setMaxSpeedFilter(kw: Double?) {
+        _state.update { it.copy(maxSpeedKw = kw) }
+    }
+
+    fun toggleConnectorFilter(connector: String) {
+        _state.update { s ->
+            val updated = s.connectorFilters.toMutableSet()
+            if (connector in updated) updated.remove(connector) else updated.add(connector)
+            s.copy(connectorFilters = updated)
+        }
     }
 
     fun selectCharger(pk: Long?) {
