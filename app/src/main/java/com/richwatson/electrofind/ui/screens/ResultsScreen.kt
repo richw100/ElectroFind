@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -19,8 +18,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.DataSource
@@ -149,11 +152,34 @@ fun ResultsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
     val state by vm.state.collectAsState()
-    var minInput by remember { mutableStateOf(state.minPriceKwh?.toString() ?: "") }
-    var maxInput by remember { mutableStateOf(state.maxPriceKwh?.toString() ?: "") }
+    val filtered = remember(state) { vm.filteredSortedChargers }
+
+    val priceMax = remember(state.chargers, state.ocmChargers, state.dataSource) {
+        val all = when (state.dataSource) {
+            DataSource.ELECTROVERSE -> state.chargers
+            DataSource.OCM -> state.ocmChargers
+            DataSource.BOTH -> state.chargers + state.ocmChargers
+        }
+        (all.mapNotNull { it.pricePerKwh }.filter { it > 0 }.maxOrNull()?.toFloat() ?: 1f)
+            .coerceAtLeast(0.5f)
+    }
+    val priceMin = 0f
+    var sliderRange by remember(state.minPriceKwh, state.maxPriceKwh, priceMax) {
+        mutableStateOf(
+            (state.minPriceKwh?.toFloat() ?: priceMin)..(state.maxPriceKwh?.toFloat() ?: priceMax)
+        )
+    }
+
+    val nearestMi = remember(filtered, state.searchLat, state.searchLng) {
+        if (state.searchLat == 0.0 && state.searchLng == 0.0) null
+        else filtered.minOfOrNull {
+            haversineMiles(state.searchLat, state.searchLng, it.coordinates.latitude, it.coordinates.longitude)
+        }
+    }
 
     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         if (showSort) {
@@ -191,31 +217,44 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text("Price per kWh (${state.currencySymbol})", style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = minInput,
-                onValueChange = { v ->
-                    minInput = v
-                    vm.setPriceFilter(v.toDoubleOrNull(), state.maxPriceKwh)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Price per kWh (${state.currencySymbol})", style = MaterialTheme.typography.labelMedium)
+            Text(
+                buildString {
+                    append("${filtered.size} chargers")
+                    nearestMi?.let { append(" · nearest ${"%.1f".format(it)} mi") }
                 },
-                label = { Text("Min") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                prefix = { Text(state.currencySymbol) }
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            OutlinedTextField(
-                value = maxInput,
-                onValueChange = { v ->
-                    maxInput = v
-                    vm.setPriceFilter(state.minPriceKwh, v.toDoubleOrNull())
-                },
-                label = { Text("Max") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                prefix = { Text(state.currencySymbol) }
+        }
+        RangeSlider(
+            value = sliderRange,
+            onValueChange = { sliderRange = it },
+            onValueChangeFinished = {
+                val min = if (sliderRange.start <= priceMin + 0.005f) null else sliderRange.start.toDouble()
+                val max = if (sliderRange.endInclusive >= priceMax - 0.005f) null else sliderRange.endInclusive.toDouble()
+                vm.setPriceFilter(min, max)
+            },
+            valueRange = priceMin..priceMax,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+        )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                if (sliderRange.start <= priceMin + 0.005f) "Any min"
+                else "${state.currencySymbol}${"%.2f".format(sliderRange.start)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                if (sliderRange.endInclusive >= priceMax - 0.005f) "Any max"
+                else "${state.currencySymbol}${"%.2f".format(sliderRange.endInclusive)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -403,4 +442,13 @@ internal val SpeedFilter.label: String get() = when (this) {
     SpeedFilter.FAST -> "7+ kW"
     SpeedFilter.RAPID -> "22+ kW"
     SpeedFilter.ULTRA -> "100+ kW"
+}
+
+private fun haversineMiles(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val R = 3958.8
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = sin(dLat / 2).pow(2) +
+            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
 }
