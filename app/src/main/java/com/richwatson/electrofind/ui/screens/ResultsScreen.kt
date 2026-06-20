@@ -353,6 +353,20 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            charger.chargingTimeRateMajor?.let { rate ->
+                Text(
+                    "+ %s%.2f/min while charging".format(currencySymbol, rate),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            charger.parkingTimeRateMajor?.let { rate ->
+                Text(
+                    "+ %s%.2f/min idle fee".format(currencySymbol, rate),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             if (charger.isStale) {
                 Text(
                     "! Cached data may be out of date",

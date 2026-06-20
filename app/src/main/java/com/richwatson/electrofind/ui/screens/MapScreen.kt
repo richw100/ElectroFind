@@ -469,6 +469,15 @@ fun ChargerMapView(
                     charger.pricePerKwh?.let {
                         Text("%s%.2f/kWh".format(currencySymbol, it), style = MaterialTheme.typography.bodyMedium)
                     }
+                    charger.connectionFeeMajor?.let {
+                        Text("+ %s%.2f connection fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    charger.chargingTimeRateMajor?.let {
+                        Text("+ %s%.2f/min while charging".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    charger.parkingTimeRateMajor?.let {
+                        Text("+ %s%.2f/min idle fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Text(
                         if (charger.hasAvailableEvse) "Available" else "In use",
                         style = MaterialTheme.typography.bodySmall

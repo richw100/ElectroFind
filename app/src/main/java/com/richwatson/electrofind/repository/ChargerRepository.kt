@@ -390,6 +390,14 @@ class ChargerRepository(
                                 currencyDetails { symbol decimalDigits minorUnitConversion }
                                 unitAmount
                               }
+                              ... on TimeRate {
+                                currencyDetails { symbol decimalDigits minorUnitConversion }
+                                unitAmount perUnit
+                              }
+                              ... on ParkingTimeRate {
+                                currencyDetails { symbol decimalDigits minorUnitConversion }
+                                unitAmount perUnit
+                              }
                             }
                           }
                         }

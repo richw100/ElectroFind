@@ -139,7 +139,7 @@ class ChargerViewModel(
                 _state.update { it.copy(isLoadingEv = false, error = "Location not found: $name") }
                 return@launch
             }
-            _state.update { it.copy(searchLat = coords.first, searchLng = coords.second) }
+            _state.update { it.copy(searchLat = coords.first, searchLng = coords.second, savedMapCenterLat = coords.first, savedMapCenterLng = coords.second, savedMapZoom = 12.0) }
             detectCurrency(coords.first, coords.second)
             _navigateToResults.tryEmit(Unit)
             val radius = _state.value.searchRadiusMiles
@@ -169,6 +169,7 @@ class ChargerViewModel(
                 isLoadingEv = true, error = null, ocmError = null,
                 searchQuery = label ?: "%.4f, %.4f".format(lat, lng),
                 searchLat = lat, searchLng = lng,
+                savedMapCenterLat = lat, savedMapCenterLng = lng, savedMapZoom = 12.0,
                 chargers = emptyList(),
                 ocmChargers = emptyList()
             )

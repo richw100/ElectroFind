@@ -94,6 +94,21 @@ data class ChargingLocation(
             .firstOrNull()
     }
 
+    private fun timeRateForType(typeName: String): Double? = evses.edges
+        .flatMap { it.node.connectors.edges }
+        .mapNotNull { edge ->
+            val rate = edge.node.priceComponents.firstOrNull { it.type == typeName }
+            rate?.let {
+                val amount = it.unitAmount ?: 0
+                if (amount == 0) null
+                else amount.toDouble() / (it.currencyDetails?.minorUnitConversion ?: 100)
+            }
+        }
+        .firstOrNull()
+
+    val chargingTimeRateMajor: Double? get() = timeRateForType("TimeRate")
+    val parkingTimeRateMajor: Double? get() = timeRateForType("ParkingTimeRate")
+
     val maxKilowatts: Double? get() {
         return evses.edges
             .flatMap { it.node.connectors.edges }
