@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
@@ -60,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -96,6 +98,7 @@ fun BrowseMapScreen(
     var searchText by remember { mutableStateOf("") }
     var suggestionsExpanded by remember { mutableStateOf(false) }
     var pendingCenter by remember { mutableStateOf<GeoPoint?>(null) }
+    var fieldFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(searchText) {
         if (searchText.length >= 2) {
@@ -161,7 +164,8 @@ fun BrowseMapScreen(
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .onFocusChanged { fieldFocused = it.isFocused },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = {
                             val top = suggestions.firstOrNull()
@@ -217,6 +221,33 @@ fun BrowseMapScreen(
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                    }
+                                }
+                                HorizontalDivider()
+                            }
+                        }
+                    } else if (fieldFocused && searchText.isEmpty() && state.searchHistory.isNotEmpty()) {
+                        HorizontalDivider()
+                        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+                            items(state.searchHistory) { entry ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            searchText = entry.label
+                                            keyboardController?.hide()
+                                            pendingCenter = GeoPoint(entry.lat, entry.lng)
+                                        }
+                                        .padding(start = 16.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        entry.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f).padding(vertical = 10.dp)
+                                    )
+                                    IconButton(onClick = { chargerViewModel.removeFromHistory(entry.label) }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(18.dp))
                                     }
                                 }
                                 HorizontalDivider()
