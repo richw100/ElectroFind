@@ -12,6 +12,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
@@ -20,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
@@ -45,6 +48,7 @@ fun SearchScreen(
     var searchText by remember { mutableStateOf("") }
     var locationError by remember { mutableStateOf<String?>(null) }
     var suggestionsExpanded by remember { mutableStateOf(false) }
+    var fieldFocused by remember { mutableStateOf(false) }
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
@@ -53,7 +57,7 @@ fun SearchScreen(
     ) { granted ->
         if (granted) {
             getCurrentLocation(fusedLocationClient,
-                onResult = { lat, lng -> chargerViewModel.searchByCoordinates(lat, lng) },
+                onResult = { lat, lng -> chargerViewModel.searchByCoordinates(lat, lng, isNearMe = true) },
                 onError = { locationError = it }
             )
         } else {
@@ -112,7 +116,7 @@ fun SearchScreen(
                     onValueChange = { searchText = it },
                     label = { Text("Town, city or postcode") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().onFocusChanged { fieldFocused = it.isFocused },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
                         keyboardController?.hide()
@@ -161,6 +165,51 @@ fun SearchScreen(
                             }
                         }
                     }
+                } else if (fieldFocused && searchText.isEmpty() && state.searchHistory.isNotEmpty()) {
+                    Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+                        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+                            items(state.searchHistory) { entry ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                searchText = entry.label
+                                                fieldFocused = false
+                                                keyboardController?.hide()
+                                                chargerViewModel.searchByCoordinates(entry.lat, entry.lng, label = entry.label)
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.History,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(entry.label, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    IconButton(
+                                        onClick = { chargerViewModel.removeFromHistory(entry.label) },
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                HorizontalDivider()
+                            }
+                        }
+                    }
                 }
             }
 
@@ -188,7 +237,7 @@ fun SearchScreen(
                             locationError = null
                             getCurrentLocation(fusedLocationClient,
                                 onResult = { lat, lng ->
-                                    chargerViewModel.searchByCoordinates(lat, lng)
+                                    chargerViewModel.searchByCoordinates(lat, lng, isNearMe = true)
                                 },
                                 onError = { locationError = it }
                             )

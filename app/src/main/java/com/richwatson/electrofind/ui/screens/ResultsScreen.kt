@@ -3,13 +3,16 @@ package com.richwatson.electrofind.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,15 +30,19 @@ import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.DataSource
+import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import com.richwatson.electrofind.viewmodel.SortOrder
 import com.richwatson.electrofind.viewmodel.SpeedFilter
+
+data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes: Int)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultsScreen(
     chargerViewModel: ChargerViewModel,
-    onCompare: () -> Unit = {}
+    onCompare: () -> Unit = {},
+    onShowOnMap: (ChargingLocation) -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
     val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
@@ -144,7 +151,17 @@ fun ResultsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(chargers, key = { "${it.sourceDisplay}_${it.pk}" }) { charger ->
-                        ChargerCard(charger = charger, showSourceBadge = state.dataSource == DataSource.BOTH, currencySymbol = state.currencySymbol)
+                        val distanceMiles = if (state.searchLat != 0.0 || state.searchLng != 0.0)
+                            haversineMiles(state.searchLat, state.searchLng, charger.coordinates.latitude, charger.coordinates.longitude)
+                        else null
+                        ChargerCard(
+                            charger = charger,
+                            showSourceBadge = state.dataSource == DataSource.BOTH,
+                            currencySymbol = state.currencySymbol,
+                            session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes),
+                            distanceMiles = distanceMiles,
+                            onShowOnMap = { onShowOnMap(charger) }
+                        )
                     }
                 }
             }
@@ -181,10 +198,17 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
         }
     }
 
+    var localStartSoc by remember(state.startSocPercent) { mutableIntStateOf(state.startSocPercent) }
+    var localTargetSoc by remember(state.targetSocPercent) { mutableIntStateOf(state.targetSocPercent) }
+    var localStayMins by remember(state.stayMinutes) { mutableIntStateOf(state.stayMinutes) }
+
     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         if (showSort) {
             Text("Sort by", style = MaterialTheme.typography.labelMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
                 SortOrder.entries.forEach { order ->
                     FilterChip(
                         selected = state.sortOrder == order,
@@ -257,11 +281,66 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        Spacer(Modifier.height(6.dp))
+        Text("Charge session", style = MaterialTheme.typography.labelMedium)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Current SoC", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("$localStartSoc%", style = MaterialTheme.typography.labelSmall)
+        }
+        Slider(
+            value = localStartSoc.toFloat(),
+            onValueChange = { localStartSoc = it.toInt() },
+            onValueChangeFinished = { vm.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
+            valueRange = 0f..100f,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Target SoC", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("$localTargetSoc%", style = MaterialTheme.typography.labelSmall)
+        }
+        Slider(
+            value = localTargetSoc.toFloat(),
+            onValueChange = { localTargetSoc = it.toInt() },
+            onValueChangeFinished = { vm.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
+            valueRange = 0f..100f,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Stay time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                when {
+                    localStayMins < 60 -> "$localStayMins min"
+                    localStayMins % 60 == 0 -> "${localStayMins / 60} hr"
+                    else -> "${localStayMins / 60}h ${localStayMins % 60}m"
+                },
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+        Slider(
+            value = localStayMins.toFloat(),
+            onValueChange = { localStayMins = it.toInt() },
+            onValueChangeFinished = { vm.setChargeSession(localStartSoc, localTargetSoc, localStayMins) },
+            valueRange = 0f..720f,
+            steps = 143,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+        )
     }
 }
 
 @Composable
-private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = false, currencySymbol: String = "€") {
+private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = false, currencySymbol: String = "€", session: ChargeSession? = null, distanceMiles: Double? = null, onShowOnMap: (() -> Unit)? = null) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -332,6 +411,12 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                     label = { Text(availText, style = MaterialTheme.typography.labelSmall) },
                     colors = AssistChipDefaults.assistChipColors(containerColor = availColor.copy(alpha = 0.12f))
                 )
+                distanceMiles?.let { d ->
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("${"%.1f".format(d)} mi", style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
                 charger.maxKilowatts?.let { kw ->
                     AssistChip(
                         onClick = {},
@@ -367,6 +452,29 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            val kw = charger.maxKilowatts
+            val price = charger.pricePerKwh
+            if (session != null && kw != null && price != null) {
+                val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                Spacer(Modifier.height(4.dp))
+                val optMins = optResult.chargeMinutes.toInt()
+                val optSoc = optResult.endSocPercent.toInt()
+                val optLabel = if (optMins >= 180) "≥3h to ${optSoc}%" else "$optMins min → ${optSoc}%"
+                Text(
+                    "⚡ Optimal: $optLabel  ·  $currencySymbol${"%.2f".format(optCost)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                val staySoc = stayResult.endSocPercent.toInt()
+                Text(
+                    "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  $currencySymbol${"%.2f".format(stayCost)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             if (charger.isStale) {
                 Text(
                     "! Cached data may be out of date",
@@ -377,6 +485,16 @@ private fun ChargerCard(charger: ChargingLocation, showSourceBadge: Boolean = fa
             }
             val context = LocalContext.current
             Row(modifier = Modifier.align(Alignment.End)) {
+                onShowOnMap?.let {
+                    TextButton(
+                        onClick = it,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Show on map", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
                 val lat = charger.coordinates.latitude
                 val lng = charger.coordinates.longitude
                 TextButton(
@@ -449,6 +567,8 @@ internal val SortOrder.label: String get() = when (this) {
     SortOrder.PRICE_ASC -> "Cheapest first"
     SortOrder.PRICE_DESC -> "Most expensive"
     SortOrder.SPEED_DESC -> "Fastest first"
+    SortOrder.OPTIMAL_COST_ASC -> "Optimal cost"
+    SortOrder.STAY_COST_ASC -> "Stay cost"
 }
 
 internal val SpeedFilter.label: String get() = when (this) {

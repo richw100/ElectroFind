@@ -177,7 +177,11 @@ class MainActivity : ComponentActivity() {
                         composable("results") {
                             ResultsScreen(
                                 chargerViewModel = chargerViewModel,
-                                onCompare = { navController.navigate("comparison") }
+                                onCompare = { navController.navigate("comparison") },
+                                onShowOnMap = { charger ->
+                                    chargerViewModel.selectCharger(charger.pk)
+                                    navController.navigate("results_map") { launchSingleTop = true }
+                                }
                             )
                         }
                         composable("results_map") {

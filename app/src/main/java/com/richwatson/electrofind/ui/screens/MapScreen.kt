@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,6 +68,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import kotlinx.coroutines.delay
 import org.osmdroid.events.MapEventsReceiver
@@ -235,6 +237,7 @@ fun ResultsMapScreen(
     val state by chargerViewModel.state.collectAsState()
     val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
     var showFilters by remember { mutableStateOf(false) }
+    var priceMode by remember { mutableStateOf(MapPriceMode.PER_KWH) }
 
     val initialCenter = when {
         state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0 ->
@@ -247,7 +250,24 @@ fun ResultsMapScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Map · ${chargers.size} chargers") },
+                title = {
+                    Column {
+                        Text("Map · ${chargers.size} chargers", style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(
+                                MapPriceMode.PER_KWH to "/kWh",
+                                MapPriceMode.OPTIMAL_COST to "Optimal",
+                                MapPriceMode.STAY_COST to "Stay"
+                            ).forEach { (mode, label) ->
+                                FilterChip(
+                                    selected = priceMode == mode,
+                                    onClick = { priceMode = mode },
+                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                        }
+                    }
+                },
                 actions = {
                     IconButton(onClick = { showFilters = !showFilters }) {
                         Icon(Icons.Default.FilterList, "Filter / Sort")
@@ -265,6 +285,9 @@ fun ResultsMapScreen(
                 initialCenter = initialCenter,
                 radiusMiles = state.searchRadiusMiles,
                 currencySymbol = state.currencySymbol,
+                session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes),
+                priceMode = priceMode,
+                selectedChargerPk = state.selectedChargerPk,
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -287,6 +310,8 @@ fun ResultsMapScreen(
     }
 }
 
+enum class MapPriceMode { PER_KWH, OPTIMAL_COST, STAY_COST }
+
 @Composable
 fun ChargerMapView(
     chargers: List<ChargingLocation>,
@@ -297,6 +322,9 @@ fun ChargerMapView(
     centerOn: GeoPoint? = null,
     radiusMiles: Int = 0,
     currencySymbol: String = "€",
+    session: ChargeSession? = null,
+    priceMode: MapPriceMode = MapPriceMode.PER_KWH,
+    selectedChargerPk: Long? = null,
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onLocationSelected: ((Double, Double) -> Unit)? = null
@@ -322,7 +350,16 @@ fun ChargerMapView(
         }
     }
 
-    LaunchedEffect(chargers, radiusMiles, myLocationPoint, currencySymbol) {
+    LaunchedEffect(selectedChargerPk, chargers) {
+        if (selectedChargerPk != null) {
+            chargers.find { it.pk == selectedChargerPk }?.let { charger ->
+                mapView.controller.animateTo(GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude))
+                if (mapView.zoomLevelDouble < 14.0) mapView.controller.setZoom(14.0)
+            }
+        }
+    }
+
+    LaunchedEffect(chargers, radiusMiles, myLocationPoint, currencySymbol, priceMode, session, selectedChargerPk) {
         mapView.overlays.clear()
 
         if (radiusMiles > 0 && (searchLat != 0.0 || searchLng != 0.0)) {
@@ -366,6 +403,21 @@ fun ChargerMapView(
         }
 
         chargers.forEach { charger ->
+            val kw = charger.maxKilowatts
+            val price = charger.pricePerKwh
+            val badgeLabel: String? = when {
+                priceMode == MapPriceMode.OPTIMAL_COST && session != null && kw != null && price != null -> {
+                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                    val cost = KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes)
+                    "%s%.2f".format(currencySymbol, cost)
+                }
+                priceMode == MapPriceMode.STAY_COST && session != null && kw != null && price != null -> {
+                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                    val cost = KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                    "%s%.2f".format(currencySymbol, cost)
+                }
+                else -> null
+            }
             val marker = Marker(mapView).apply {
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
                 title = charger.name
@@ -374,7 +426,7 @@ fun ChargerMapView(
                     append(charger.operator.name)
                     append(if (charger.hasAvailableEvse) " · Available" else " · In use")
                 }
-                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, isOcm = charger.sourceDisplay == com.richwatson.electrofind.api.models.DataSource.OCM, currencySymbol = currencySymbol)
+                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, isOcm = charger.sourceDisplay == com.richwatson.electrofind.api.models.DataSource.OCM, currencySymbol = currencySymbol, labelOverride = badgeLabel, isSelected = charger.pk == selectedChargerPk)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
                     dialogCharger = charger
@@ -478,6 +530,28 @@ fun ChargerMapView(
                     charger.parkingTimeRateMajor?.let {
                         Text("+ %s%.2f/min idle fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    val kw = charger.maxKilowatts
+                    val price = charger.pricePerKwh
+                    if (session != null && kw != null && price != null) {
+                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                        val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                        val optMins = optResult.chargeMinutes.toInt()
+                        val optSoc = optResult.endSocPercent.toInt()
+                        val optLabel = if (optMins >= 180) "≥3h to ${optSoc}%" else "$optMins min → ${optSoc}%"
+                        Text(
+                            "⚡ Optimal: $optLabel  ·  $currencySymbol${"%.2f".format(optCost)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        val staySoc = stayResult.endSocPercent.toInt()
+                        Text(
+                            "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  $currencySymbol${"%.2f".format(stayCost)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Text(
                         if (charger.hasAvailableEvse) "Available" else "In use",
                         style = MaterialTheme.typography.bodySmall
@@ -571,10 +645,11 @@ private fun myLocationDrawable(context: Context): Drawable {
 @Composable
 private fun LocalContext() = androidx.compose.ui.platform.LocalContext.current
 
-private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, isOcm: Boolean = false, currencySymbol: String = "€"): Drawable {
+private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, isOcm: Boolean = false, currencySymbol: String = "€", labelOverride: String? = null, isSelected: Boolean = false): Drawable {
     val dp = context.resources.displayMetrics.density
-    val w = (68 * dp).toInt()
-    val h = (32 * dp).toInt()
+    val border = if (isSelected) (3 * dp) else 0f
+    val w = (68 * dp).toInt() + (border * 2).toInt()
+    val h = (32 * dp).toInt() + (border * 2).toInt()
     val r = 8 * dp
 
     val bgColor = when {
@@ -589,8 +664,13 @@ private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolea
     val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
+    if (isSelected) {
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+        canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r + border, r + border, borderPaint)
+    }
+
     val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bgColor }
-    canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r, r, bgPaint)
+    canvas.drawRoundRect(border, border, w - border, h - border, r, r, bgPaint)
 
     val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
@@ -599,14 +679,15 @@ private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolea
         isFakeBoldText = true
     }
     val staleTag = if (isStale) "!" else ""
-    val label = when {
+    val label = labelOverride?.let { "$it$staleTag" } ?: when {
         isOcm -> "OCM$staleTag"
         price == null -> "?$staleTag"
         price == 0.0 -> "FREE$staleTag"
         else -> "%s%.2f$staleTag".format(currencySymbol, price)
     }
-    val yPos = h / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
-    canvas.drawText(label, w / 2f, yPos, textPaint)
+    val cx = w / 2f
+    val cy = h / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
+    canvas.drawText(label, cx, cy, textPaint)
 
     return BitmapDrawable(context.resources, bitmap)
 }

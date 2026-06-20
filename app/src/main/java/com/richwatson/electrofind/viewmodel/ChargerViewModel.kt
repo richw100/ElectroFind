@@ -3,6 +3,7 @@ package com.richwatson.electrofind.viewmodel
 import android.app.Application
 import android.location.Geocoder
 import android.util.Log
+import com.richwatson.electrofind.util.KonaChargeCurve
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -24,9 +25,11 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class SortOrder { PRICE_ASC, PRICE_DESC, SPEED_DESC }
+enum class SortOrder { PRICE_ASC, PRICE_DESC, SPEED_DESC, OPTIMAL_COST_ASC, STAY_COST_ASC }
 enum class SpeedFilter { ALL, FAST, RAPID, ULTRA }
 enum class ThemeMode { LIGHT, DARK, SYSTEM }
+
+data class SearchHistoryEntry(val label: String, val lat: Double, val lng: Double)
 
 data class SearchState(
     val isLoadingEv: Boolean = false,
@@ -51,7 +54,12 @@ data class SearchState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val savedMapZoom: Double = 14.0,
     val savedMapCenterLat: Double = 0.0,
-    val savedMapCenterLng: Double = 0.0
+    val savedMapCenterLng: Double = 0.0,
+    val startSocPercent: Int = 20,
+    val targetSocPercent: Int = 80,
+    val stayMinutes: Int = 30,
+    val searchHistory: List<SearchHistoryEntry> = emptyList(),
+    val selectedChargerPk: Long? = null
 ) {
     val isLoading: Boolean get() = isLoadingEv || isLoadingOcm
 }
@@ -83,7 +91,11 @@ class ChargerViewModel(
                 themeMode = appPreferences.themeMode,
                 savedMapZoom = appPreferences.mapZoom,
                 savedMapCenterLat = appPreferences.mapCenterLat,
-                savedMapCenterLng = appPreferences.mapCenterLng
+                savedMapCenterLng = appPreferences.mapCenterLng,
+                startSocPercent = appPreferences.startSocPercent,
+                targetSocPercent = appPreferences.targetSocPercent,
+                stayMinutes = appPreferences.stayMinutes,
+                searchHistory = loadSearchHistory()
             )
         }
     }
@@ -124,6 +136,12 @@ class ChargerViewModel(
                 SortOrder.PRICE_ASC -> list.sortedBy { it.pricePerKwh ?: Double.MAX_VALUE }
                 SortOrder.PRICE_DESC -> list.sortedByDescending { it.pricePerKwh ?: -1.0 }
                 SortOrder.SPEED_DESC -> list.sortedByDescending { it.maxKilowatts ?: 0.0 }
+                SortOrder.OPTIMAL_COST_ASC -> list.sortedBy { charger ->
+                    charger.simCost(s, stayMinutes = null) ?: Double.MAX_VALUE
+                }
+                SortOrder.STAY_COST_ASC -> list.sortedBy { charger ->
+                    charger.simCost(s, stayMinutes = s.stayMinutes.toDouble()) ?: Double.MAX_VALUE
+                }
             }
             Log.d("ChargerViewModel", "filteredSortedChargers: returning ${list.size}")
             return list
@@ -140,6 +158,7 @@ class ChargerViewModel(
                 return@launch
             }
             _state.update { it.copy(searchLat = coords.first, searchLng = coords.second, savedMapCenterLat = coords.first, savedMapCenterLng = coords.second, savedMapZoom = 12.0) }
+            addToHistory(name, coords.first, coords.second)
             detectCurrency(coords.first, coords.second)
             _navigateToResults.tryEmit(Unit)
             val radius = _state.value.searchRadiusMiles
@@ -162,17 +181,29 @@ class ChargerViewModel(
         _suggestions.value = emptyList()
     }
 
-    fun searchByCoordinates(lat: Double, lng: Double, label: String? = null, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
+    fun searchByCoordinates(lat: Double, lng: Double, label: String? = null, socketGroups: List<String> = listOf("CCS", "TYPE_2"), isNearMe: Boolean = false) {
+        val immediateLabel = label ?: if (isNearMe) "Near me" else "%.4f, %.4f".format(lat, lng)
         searchJob?.cancel()
         _state.update {
             it.copy(
                 isLoadingEv = true, error = null, ocmError = null,
-                searchQuery = label ?: "%.4f, %.4f".format(lat, lng),
+                searchQuery = immediateLabel,
                 searchLat = lat, searchLng = lng,
                 savedMapCenterLat = lat, savedMapCenterLng = lng, savedMapZoom = 12.0,
                 chargers = emptyList(),
                 ocmChargers = emptyList()
             )
+        }
+        addToHistory(immediateLabel, lat, lng)
+        if (isNearMe) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    @Suppress("DEPRECATION")
+                    val address = Geocoder(application).getFromLocation(lat, lng, 1)?.firstOrNull()
+                    val town = address?.locality ?: address?.subLocality ?: address?.subAdminArea ?: address?.adminArea
+                    if (town != null) updateHistoryLabel(immediateLabel, "Near me · $town", lat, lng)
+                } catch (e: Exception) { /* keep "Near me" */ }
+            }
         }
         detectCurrency(lat, lng)
         _navigateToResults.tryEmit(Unit)
@@ -274,9 +305,57 @@ class ChargerViewModel(
         _state.update { it.copy(connectorFilter = connector) }
     }
 
+    fun selectCharger(pk: Long?) {
+        _state.update { it.copy(selectedChargerPk = pk) }
+    }
+
+    fun setChargeSession(startSoc: Int, targetSoc: Int, stayMinutes: Int) {
+        appPreferences.startSocPercent = startSoc
+        appPreferences.targetSocPercent = targetSoc
+        appPreferences.stayMinutes = stayMinutes
+        _state.update { it.copy(startSocPercent = startSoc, targetSocPercent = targetSoc, stayMinutes = stayMinutes) }
+    }
+
     fun clearResults() {
         searchJob?.cancel()
         _state.update { it.copy(chargers = emptyList(), ocmChargers = emptyList(), error = null, isLoadingEv = false, isLoadingOcm = false) }
+    }
+
+    private fun loadSearchHistory(): List<SearchHistoryEntry> {
+        val raw = appPreferences.rawSearchHistory
+        if (raw.isEmpty()) return emptyList()
+        return raw.split("\n").mapNotNull { line ->
+            val parts = line.split("\t")
+            if (parts.size == 3) try {
+                SearchHistoryEntry(parts[0], parts[1].toDouble(), parts[2].toDouble())
+            } catch (e: Exception) { null } else null
+        }
+    }
+
+    private fun addToHistory(label: String, lat: Double, lng: Double) {
+        val current = loadSearchHistory().toMutableList()
+        current.removeAll { it.label.equals(label, ignoreCase = true) }
+        current.add(0, SearchHistoryEntry(label, lat, lng))
+        val trimmed = current.take(10)
+        appPreferences.rawSearchHistory = trimmed.joinToString("\n") { "${it.label}\t${it.lat}\t${it.lng}" }
+        _state.update { it.copy(searchHistory = trimmed) }
+    }
+
+    private fun updateHistoryLabel(oldLabel: String, newLabel: String, lat: Double, lng: Double) {
+        val current = loadSearchHistory().toMutableList()
+        val idx = current.indexOfFirst { it.label == oldLabel && it.lat == lat && it.lng == lng }
+        if (idx >= 0) {
+            current[idx] = SearchHistoryEntry(newLabel, lat, lng)
+            appPreferences.rawSearchHistory = current.joinToString("\n") { "${it.label}\t${it.lat}\t${it.lng}" }
+            _state.update { it.copy(searchHistory = current) }
+        }
+    }
+
+    fun removeFromHistory(label: String) {
+        val current = loadSearchHistory().toMutableList()
+        current.removeAll { it.label == label }
+        appPreferences.rawSearchHistory = current.joinToString("\n") { "${it.label}\t${it.lat}\t${it.lng}" }
+        _state.update { it.copy(searchHistory = current) }
     }
 
     fun detectCurrency(lat: Double, lng: Double) {
@@ -308,4 +387,23 @@ class ChargerViewModel(
                 .getSymbol(java.util.Locale.getDefault())
         }
     } catch (e: Exception) { "€" }
+}
+
+private fun ChargingLocation.simCost(state: SearchState, stayMinutes: Double?): Double? {
+    val kw = maxKilowatts ?: return null
+    val price = pricePerKwh ?: return null
+    val result = KonaChargeCurve.simulate(
+        state.startSocPercent.toFloat(),
+        state.targetSocPercent.toFloat(),
+        kw,
+        stayMinutes
+    )
+    return KonaChargeCurve.totalCost(
+        result = result,
+        pricePerKwh = price,
+        connectionFee = connectionFeeMajor ?: 0.0,
+        chargingRatePerMin = chargingTimeRateMajor ?: 0.0,
+        parkingRatePerMin = parkingTimeRateMajor ?: 0.0,
+        stayMinutes = stayMinutes ?: result.chargeMinutes
+    )
 }
