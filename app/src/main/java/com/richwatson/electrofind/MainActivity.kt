@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
@@ -21,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -34,6 +36,7 @@ import com.richwatson.electrofind.ui.screens.BrowseMapScreen
 import com.richwatson.electrofind.ui.screens.LoginScreen
 import com.richwatson.electrofind.ui.screens.ResultsMapScreen
 import com.richwatson.electrofind.ui.screens.ResultsScreen
+import com.richwatson.electrofind.ui.screens.RoutePlannerScreen
 import com.richwatson.electrofind.ui.screens.SearchScreen
 import com.richwatson.electrofind.ui.screens.SettingsScreen
 import com.richwatson.electrofind.ui.theme.ElectroFindTheme
@@ -82,7 +85,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     icon = { Icon(Icons.Default.Search, null) },
-                                    label = { Text("Search") }
+                                    label = { Text("Search", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentRoute == "results",
@@ -94,7 +97,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     icon = { Icon(Icons.AutoMirrored.Filled.List, null) },
-                                    label = { Text("List") }
+                                    label = { Text("List", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentRoute in listOf("results_map", "browse_map"),
@@ -106,7 +109,18 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     icon = { Icon(Icons.Default.Map, null) },
-                                    label = { Text("Map") }
+                                    label = { Text("Map", fontSize = 10.sp) }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute == "route",
+                                    onClick = {
+                                        navController.navigate("route") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Route, null) },
+                                    label = { Text("Route", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentRoute == "settings",
@@ -117,7 +131,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     icon = { Icon(Icons.Default.Settings, null) },
-                                    label = { Text("Settings") }
+                                    label = { Text("Settings", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentRoute == "curve",
@@ -128,7 +142,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     icon = { Icon(Icons.Default.ShowChart, null) },
-                                    label = { Text("Curve") }
+                                    label = { Text("Curve", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentRoute == "about",
@@ -139,7 +153,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     icon = { Icon(Icons.Default.Info, null) },
-                                    label = { Text("About") }
+                                    label = { Text("About", fontSize = 10.sp) }
                                 )
                             }
                         }
@@ -205,6 +219,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             )
+                        }
+                        composable("route") {
+                            RoutePlannerScreen(chargerViewModel = chargerViewModel)
                         }
                         composable("settings") {
                             SettingsScreen(

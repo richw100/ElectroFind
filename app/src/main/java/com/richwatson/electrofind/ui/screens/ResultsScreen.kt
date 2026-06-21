@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,6 +35,7 @@ import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.CarProfile
+import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import com.richwatson.electrofind.viewmodel.SortOrder
@@ -50,6 +52,7 @@ fun ResultsScreen(
     val state by chargerViewModel.state.collectAsState()
     val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
     var showFilters by remember { mutableStateOf(false) }
+    var addToRoutePk by remember { mutableStateOf<Long?>(null) }
 
     Scaffold(
         topBar = {
@@ -161,13 +164,65 @@ fun ResultsScreen(
                             isFavourite = charger.pk in state.favouritePks,
                             isExcluded = charger.pk in state.excludedPks,
                             onToggleFavourite = { chargerViewModel.toggleFavourite(charger.pk) },
-                            onToggleExcluded = { chargerViewModel.toggleExcluded(charger.pk) }
+                            onToggleExcluded = { chargerViewModel.toggleExcluded(charger.pk) },
+                            onAddToRoute = { pk ->
+                                if (state.routeStops.isEmpty()) chargerViewModel.addToRoute(pk)
+                                else addToRoutePk = pk
+                            }
                         )
                     }
                 }
             }
         }
     }
+
+    // "Add to route" dialog — shown when there are existing stops to choose from
+    addToRoutePk?.let { pk ->
+        AddToRouteDialog(
+            pk = pk,
+            routeStops = state.routeStops,
+            onNewStop = { chargerViewModel.addToRoute(pk); addToRoutePk = null },
+            onAddAlternative = { stopId -> chargerViewModel.addAlternativeToStop(stopId, pk); addToRoutePk = null },
+            onDismiss = { addToRoutePk = null }
+        )
+    }
+}
+
+@Composable
+internal fun AddToRouteDialog(
+    pk: Long,
+    routeStops: List<RouteStop>,
+    onNewStop: () -> Unit,
+    onAddAlternative: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add to route") },
+        text = {
+            Column {
+                TextButton(onClick = onNewStop, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("New stop", modifier = Modifier.weight(1f))
+                }
+                HorizontalDivider()
+                routeStops.forEachIndexed { idx, stop ->
+                    TextButton(
+                        onClick = { onAddAlternative(stop.id) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Alternative for #${idx + 1} · ${stop.displayName(idx)}",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -376,7 +431,8 @@ private fun ChargerCard(
     isFavourite: Boolean = false,
     isExcluded: Boolean = false,
     onToggleFavourite: () -> Unit = {},
-    onToggleExcluded: () -> Unit = {}
+    onToggleExcluded: () -> Unit = {},
+    onAddToRoute: ((Long) -> Unit)? = null
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -536,6 +592,16 @@ private fun ChargerCard(
             }
             val context = LocalContext.current
             Row(modifier = Modifier.align(Alignment.End)) {
+                onAddToRoute?.let { addFn ->
+                    TextButton(
+                        onClick = { addFn(charger.pk) },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Route", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
                 onShowOnMap?.let {
                     TextButton(
                         onClick = it,
@@ -543,7 +609,7 @@ private fun ChargerCard(
                     ) {
                         Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Show on map", style = MaterialTheme.typography.labelSmall)
+                        Text("Map", style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 val lat = charger.coordinates.latitude
@@ -557,7 +623,7 @@ private fun ChargerCard(
                 ) {
                     Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Google Maps", style = MaterialTheme.typography.labelSmall)
+                    Text("Maps", style = MaterialTheme.typography.labelSmall)
                 }
                 charger.externalId?.let { extId ->
                     TextButton(

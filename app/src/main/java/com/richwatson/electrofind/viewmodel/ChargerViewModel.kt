@@ -2,7 +2,10 @@ package com.richwatson.electrofind.viewmodel
 
 import android.app.Application
 import android.location.Geocoder
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.model.CarProfile
+import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.repository.CarProfileRepository
 import com.richwatson.electrofind.util.KonaChargeCurve
 import androidx.lifecycle.ViewModel
@@ -66,7 +69,9 @@ data class SearchState(
     val excludedPks: Set<Long> = emptySet(),
     val showOnlyFavourites: Boolean = false,
     val hideExcluded: Boolean = false,
-    val favouriteChargers: List<ChargingLocation> = emptyList()
+    val favouriteChargers: List<ChargingLocation> = emptyList(),
+    val routeStops: List<RouteStop> = emptyList(),
+    val routeChargers: Map<Long, ChargingLocation> = emptyMap()
 ) {
     val isLoading: Boolean get() = isLoadingEv
 }
@@ -80,6 +85,7 @@ class ChargerViewModel(
 
     private val _state = MutableStateFlow(SearchState())
     val state: StateFlow<SearchState> = _state.asStateFlow()
+    private val gson = Gson()
 
     private val _navigateToResults = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val navigateToResults: SharedFlow<Unit> = _navigateToResults.asSharedFlow()
@@ -113,6 +119,11 @@ class ChargerViewModel(
             )
         }
         loadFavouriteChargers(appPreferences.favouritePks)
+        val stops = loadRoutePlan()
+        if (stops.isNotEmpty()) {
+            _state.update { it.copy(routeStops = stops) }
+            loadRouteChargers(stops.flatMap { it.chargerPks }.toSet())
+        }
     }
 
     val filteredSortedChargers: List<ChargingLocation>
@@ -357,6 +368,115 @@ class ChargerViewModel(
         appPreferences.targetSocPercent = targetSoc
         appPreferences.stayMinutes = stayMinutes
         _state.update { it.copy(startSocPercent = startSoc, targetSocPercent = targetSoc, stayMinutes = stayMinutes) }
+    }
+
+    // ── Route planner ────────────────────────────────────────────────────────
+
+    private fun loadRoutePlan(): List<RouteStop> {
+        val raw = appPreferences.rawRoutePlan
+        if (raw.isEmpty()) return emptyList()
+        return try {
+            val type = object : TypeToken<List<RouteStop>>() {}.type
+            gson.fromJson<List<RouteStop>>(raw, type) ?: emptyList()
+        } catch (e: Exception) { emptyList() }
+    }
+
+    private fun saveRoutePlan(stops: List<RouteStop>) {
+        appPreferences.rawRoutePlan = gson.toJson(stops)
+    }
+
+    private fun loadRouteChargers(pks: Set<Long>) {
+        if (pks.isEmpty()) return
+        viewModelScope.launch {
+            val chargers = repository.getChargersByPks(pks)
+            _state.update { s -> s.copy(routeChargers = s.routeChargers + chargers.associateBy { it.pk }) }
+        }
+    }
+
+    fun addToRoute(pk: Long) {
+        val stop = RouteStop(
+            id = java.util.UUID.randomUUID().toString(),
+            chargerPks = listOf(pk),
+            arrivalSocPercent = _state.value.startSocPercent,
+            departureSocPercent = _state.value.targetSocPercent,
+            stayMinutes = _state.value.stayMinutes
+        )
+        val updated = _state.value.routeStops + stop
+        saveRoutePlan(updated)
+        _state.update { it.copy(routeStops = updated) }
+        loadRouteChargers(setOf(pk))
+    }
+
+    fun addAlternativeToStop(stopId: String, pk: Long) {
+        val updated = _state.value.routeStops.map { stop ->
+            if (stop.id == stopId && pk !in stop.chargerPks) stop.copy(chargerPks = stop.chargerPks + pk)
+            else stop
+        }
+        saveRoutePlan(updated)
+        _state.update { it.copy(routeStops = updated) }
+        loadRouteChargers(setOf(pk))
+    }
+
+    fun removeFromRoute(stopId: String) {
+        val updated = _state.value.routeStops.filter { it.id != stopId }
+        saveRoutePlan(updated)
+        _state.update { it.copy(routeStops = updated) }
+    }
+
+    fun moveRouteStop(stopId: String, delta: Int) {
+        val stops = _state.value.routeStops.toMutableList()
+        val idx = stops.indexOfFirst { it.id == stopId }
+        if (idx < 0) return
+        val newIdx = (idx + delta).coerceIn(0, stops.size - 1)
+        if (idx != newIdx) {
+            val item = stops.removeAt(idx)
+            stops.add(newIdx, item)
+            saveRoutePlan(stops)
+            _state.update { it.copy(routeStops = stops) }
+        }
+    }
+
+    fun setActiveCharger(stopId: String, index: Int) {
+        val updated = _state.value.routeStops.map { stop ->
+            if (stop.id == stopId) stop.copy(activeIndex = index.coerceIn(0, stop.chargerPks.size - 1))
+            else stop
+        }
+        saveRoutePlan(updated)
+        _state.update { it.copy(routeStops = updated) }
+    }
+
+    fun removeAlternative(stopId: String, pk: Long) {
+        val updated = _state.value.routeStops.map { stop ->
+            if (stop.id != stopId) return@map stop
+            val newPks = stop.chargerPks.filter { it != pk }
+            if (newPks.isEmpty()) return@map stop
+            stop.copy(chargerPks = newPks, activeIndex = stop.activeIndex.coerceIn(0, newPks.size - 1))
+        }
+        saveRoutePlan(updated)
+        _state.update { it.copy(routeStops = updated) }
+    }
+
+    fun updateRouteStop(stopId: String, arrivalSoc: Int, departureSoc: Int, stayMinutes: Int) {
+        val updated = _state.value.routeStops.map { stop ->
+            if (stop.id == stopId) stop.copy(arrivalSocPercent = arrivalSoc, departureSocPercent = departureSoc, stayMinutes = stayMinutes)
+            else stop
+        }
+        saveRoutePlan(updated)
+        _state.update { it.copy(routeStops = updated) }
+    }
+
+    fun updateRouteStopName(stopId: String, name: String) {
+        val updated = _state.value.routeStops.map { stop ->
+            if (stop.id == stopId) stop.copy(customName = name.takeIf { it.isNotBlank() })
+            else stop
+        }
+        saveRoutePlan(updated)
+        _state.update { it.copy(routeStops = updated) }
+    }
+
+    fun clearRoute() {
+        saveRoutePlan(emptyList())
+        _state.update { it.copy(routeStops = emptyList()) }
     }
 
     fun clearResults() {

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.AlertDialog
@@ -79,6 +80,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import kotlinx.coroutines.delay
@@ -165,6 +167,9 @@ fun BrowseMapScreen(
                 excludedPks = state.excludedPks,
                 onToggleFavourite = { chargerViewModel.toggleFavourite(it) },
                 onToggleExcluded = { chargerViewModel.toggleExcluded(it) },
+                routeStops = state.routeStops,
+                onAddToRoute = { chargerViewModel.addToRoute(it) },
+                onAddAlternativeToStop = { stopId, pk -> chargerViewModel.addAlternativeToStop(stopId, pk) },
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -415,6 +420,9 @@ fun ResultsMapScreen(
                 excludedPks = state.excludedPks,
                 onToggleFavourite = { chargerViewModel.toggleFavourite(it) },
                 onToggleExcluded = { chargerViewModel.toggleExcluded(it) },
+                routeStops = state.routeStops,
+                onAddToRoute = { chargerViewModel.addToRoute(it) },
+                onAddAlternativeToStop = { stopId, pk -> chargerViewModel.addAlternativeToStop(stopId, pk) },
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -456,6 +464,9 @@ fun ChargerMapView(
     excludedPks: Set<Long> = emptySet(),
     onToggleFavourite: (Long) -> Unit = {},
     onToggleExcluded: (Long) -> Unit = {},
+    routeStops: List<RouteStop> = emptyList(),
+    onAddToRoute: (Long) -> Unit = {},
+    onAddAlternativeToStop: (String, Long) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onMapTapped: () -> Unit = {},
@@ -463,6 +474,7 @@ fun ChargerMapView(
 ) {
     val context = LocalContext()
     var dialogCharger by remember { mutableStateOf<ChargingLocation?>(null) }
+    var routeAddCharger by remember { mutableStateOf<ChargingLocation?>(null) }
     var myLocationPoint by remember { mutableStateOf<GeoPoint?>(null) }
 
     val mapView = remember {
@@ -886,9 +898,32 @@ fun ChargerMapView(
                             Text("Electroverse")
                         }
                     }
+                    TextButton(onClick = {
+                        if (routeStops.isEmpty()) {
+                            onAddToRoute(charger.pk)
+                            dialogCharger = null
+                        } else {
+                            routeAddCharger = charger
+                            dialogCharger = null
+                        }
+                    }) {
+                        Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Route")
+                    }
                 }
             },
             dismissButton = { TextButton(onClick = { dialogCharger = null }) { Text("Close") } }
+        )
+    }
+
+    routeAddCharger?.let { charger ->
+        AddToRouteDialog(
+            pk = charger.pk,
+            routeStops = routeStops,
+            onNewStop = { onAddToRoute(charger.pk); routeAddCharger = null },
+            onAddAlternative = { stopId -> onAddAlternativeToStop(stopId, charger.pk); routeAddCharger = null },
+            onDismiss = { routeAddCharger = null }
         )
     }
 }

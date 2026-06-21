@@ -60,4 +60,8 @@ class AppPreferences(context: Context) {
     var rawSearchHistory: String
         get() = prefs.getString("search_history", "") ?: ""
         set(value) { prefs.edit().putString("search_history", value).apply() }
+
+    var rawRoutePlan: String
+        get() = prefs.getString("route_plan", "") ?: ""
+        set(value) { prefs.edit().putString("route_plan", value).apply() }
 }
