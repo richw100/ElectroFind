@@ -116,9 +116,12 @@ class ChargerRepository(
         onStatus: (status: String, progress: Float) -> Unit = { _, _ -> }
     ): Flow<ChargingLocation> = channelFlow {
         val now = System.currentTimeMillis()
-        val centre = TileCalculator.latLngToTile(lat, lng, zoom)
-        // Each zoom-12 tile is ~6 km wide at UK latitudes; expand grid to cover the full radius
-        val gridRadius = maxOf(1, kotlin.math.ceil(radiusMiles * 1609.344 / 6000.0).toInt())
+        // Use finer tiles for small radii so fewer out-of-radius PKs are queued.
+        // Zoom 14 tiles are ~1.5 km wide at UK latitudes (vs ~6 km at zoom 12).
+        val effectiveZoom = if (radiusMiles <= 5) 14 else zoom
+        val tileWidthM = if (effectiveZoom == 14) 1500.0 else 6000.0
+        val centre = TileCalculator.latLngToTile(lat, lng, effectiveZoom)
+        val gridRadius = maxOf(1, kotlin.math.ceil(radiusMiles * 1609.344 / tileWidthM).toInt())
         val tiles = TileCalculator.surroundingTiles(centre, gridRadius)
 
         onStatus("Searching ${tiles.size} tiles…", 0f)
@@ -192,17 +195,20 @@ class ChargerRepository(
                                             pkChannel.send(pk)
                                         }
                                         now - entity.cachedAt > STALE_MS -> {
-                                            // Stale — show old version now, refresh in background
-                                            val charger = gson.fromJson(entity.json, ChargingLocation::class.java)
-                                                .copy(cachedAt = entity.cachedAt)
-                                            val clat = charger.coordinates.latitude
-                                            val clng = charger.coordinates.longitude
-                                            if ((clat != 0.0 || clng != 0.0) && distanceMiles(lat, lng, clat, clng) <= radiusMiles) {
+                                            // Stale — only show and refresh if within radius.
+                                            // entity.lat/lng avoids deserialising JSON just to check distance.
+                                            val clat = entity.lat
+                                            val clng = entity.lng
+                                            val withinRadius = (clat == 0.0 && clng == 0.0) ||
+                                                distanceMiles(lat, lng, clat, clng) <= radiusMiles
+                                            if (withinRadius) {
+                                                val charger = gson.fromJson(entity.json, ChargingLocation::class.java)
+                                                    .copy(cachedAt = entity.cachedAt)
                                                 send(charger)
                                                 cachedCount.incrementAndGet()
+                                                totalQueued.incrementAndGet()
+                                                pkChannel.send(pk)
                                             }
-                                            totalQueued.incrementAndGet()
-                                            pkChannel.send(pk)
                                         }
                                         else -> {
                                             // Fresh cache — emit immediately, no API call needed

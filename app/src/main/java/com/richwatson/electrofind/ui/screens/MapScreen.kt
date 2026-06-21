@@ -444,26 +444,36 @@ fun ChargerMapView(
             mapView.overlays.add(myMarker)
         }
 
-        // First pass: compute session costs for colour normalisation
-        val sessionCosts: List<Double?> = chargers.map { charger ->
-            val kw = charger.maxKilowatts ?: return@map null
-            val price = charger.pricePerKwh ?: return@map null
-            if (session == null) return@map null
+        // First pass: compute a score per charger for colour normalisation.
+        // PER_KWH uses raw price; session modes use simulated cost.
+        // Free chargers score 0 (always green) and are excluded from the rank baseline.
+        val scores: List<Double?> = chargers.map { charger ->
             when (priceMode) {
-                MapPriceMode.OPTIMAL_COST -> {
-                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                    KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes)
+                MapPriceMode.PER_KWH -> charger.pricePerKwh
+                else -> {
+                    val kw = charger.maxKilowatts ?: return@map null
+                    val price = charger.pricePerKwh ?: return@map null
+                    if (session == null) return@map null
+                    when (priceMode) {
+                        MapPriceMode.OPTIMAL_COST -> {
+                            val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
+                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes)
+                        }
+                        MapPriceMode.STAY_COST -> {
+                            val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
+                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                        }
+                        else -> null
+                    }
                 }
-                MapPriceMode.STAY_COST -> {
-                    val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                    KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
-                }
-                else -> null
             }
         }
-        val paidCosts = sessionCosts.filterNotNull().filter { it > 0.0 }
-        val minSessionCost = paidCosts.minOrNull()
-        val maxSessionCost = paidCosts.maxOrNull()
+        // Sorted paid scores for blended colouring: 50% percentile rank + 50% linear min-max.
+        // Percentile ensures spread; linear preserves the signal that genuinely cheap chargers
+        // look meaningfully greener than moderately cheap ones.
+        val sortedPaidScores = scores.filterNotNull().filter { it > 0.0 }.sorted()
+        val minPaidScore = sortedPaidScores.firstOrNull() ?: 0.0
+        val maxPaidScore = sortedPaidScores.lastOrNull() ?: 0.0
 
         // Colour constants reused in badge rows
         val colorGreen  = android.graphics.Color.rgb(46, 125, 50)
@@ -474,13 +484,23 @@ fun ChargerMapView(
 
         // Second pass: create markers
         chargers.forEachIndexed { idx, charger ->
-            val sessionCost = sessionCosts[idx]
-            val badgeLabel: String? = sessionCost?.let { "%s%.2f".format(currencySymbol, it) }
+            val score = scores[idx]
+            // Only show session-cost label in session-cost modes; PER_KWH badge shows price via price param
+            val badgeLabel: String? = if (priceMode != MapPriceMode.PER_KWH) score?.let { "%s%.2f".format(currencySymbol, it) } else null
+            // Blended colour fraction: 50% percentile rank + 50% linear min-max.
+            // Gives a spread across the full colour range while still showing meaningful
+            // differences between genuinely cheap and moderately priced chargers.
             val colorFraction: Float? = when {
-                sessionCost == null -> null
-                sessionCost <= 0.0 -> 0f
-                minSessionCost == null || maxSessionCost == null || maxSessionCost <= minSessionCost -> null
-                else -> ((sessionCost - minSessionCost) / (maxSessionCost - minSessionCost)).toFloat().coerceIn(0f, 1f)
+                score == null -> null
+                score <= 0.0 -> 0f
+                sortedPaidScores.size <= 1 -> 0f
+                else -> {
+                    val percentile = sortedPaidScores.count { it < score }.toFloat() / sortedPaidScores.size.toFloat()
+                    val linear = if (maxPaidScore > minPaidScore)
+                        ((score - minPaidScore) / (maxPaidScore - minPaidScore)).toFloat().coerceIn(0f, 1f)
+                    else 0f
+                    ((percentile + linear) / 2f).coerceIn(0f, 1f)
+                }
             }
 
             // Multi-row badge: one row per distinct price, showing only the fastest connector at that price
