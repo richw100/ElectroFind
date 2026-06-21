@@ -34,11 +34,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Card
@@ -318,6 +322,10 @@ fun ResultsMapScreen(
                 session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes, state.activeProfile),
                 priceMode = priceMode,
                 selectedChargerPk = state.selectedChargerPk,
+                favouritePks = state.favouritePks,
+                excludedPks = state.excludedPks,
+                onToggleFavourite = { chargerViewModel.toggleFavourite(it) },
+                onToggleExcluded = { chargerViewModel.toggleExcluded(it) },
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -355,6 +363,10 @@ fun ChargerMapView(
     session: ChargeSession? = null,
     priceMode: MapPriceMode = MapPriceMode.PER_KWH,
     selectedChargerPk: Long? = null,
+    favouritePks: Set<Long> = emptySet(),
+    excludedPks: Set<Long> = emptySet(),
+    onToggleFavourite: (Long) -> Unit = {},
+    onToggleExcluded: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onLocationSelected: ((Double, Double, String?) -> Unit)? = null
@@ -389,7 +401,7 @@ fun ChargerMapView(
         }
     }
 
-    LaunchedEffect(chargers, radiusMiles, myLocationPoint, currencySymbol, priceMode, session, selectedChargerPk) {
+    LaunchedEffect(chargers, radiusMiles, myLocationPoint, currencySymbol, priceMode, session, selectedChargerPk, favouritePks, excludedPks) {
         mapView.overlays.clear()
 
         if (radiusMiles > 0 && (searchLat != 0.0 || searchLng != 0.0)) {
@@ -453,6 +465,13 @@ fun ChargerMapView(
         val minSessionCost = paidCosts.minOrNull()
         val maxSessionCost = paidCosts.maxOrNull()
 
+        // Colour constants reused in badge rows
+        val colorGreen  = android.graphics.Color.rgb(46, 125, 50)
+        val colorOrange = android.graphics.Color.rgb(230, 119, 0)
+        val colorRed    = android.graphics.Color.rgb(183, 28, 28)
+        val colorGray   = android.graphics.Color.rgb(100, 100, 100)
+        val colorFree   = android.graphics.Color.rgb(27, 94, 32)
+
         // Second pass: create markers
         chargers.forEachIndexed { idx, charger ->
             val sessionCost = sessionCosts[idx]
@@ -463,15 +482,71 @@ fun ChargerMapView(
                 minSessionCost == null || maxSessionCost == null || maxSessionCost <= minSessionCost -> null
                 else -> ((sessionCost - minSessionCost) / (maxSessionCost - minSessionCost)).toFloat().coerceIn(0f, 1f)
             }
+
+            // Multi-row badge: one row per distinct price, showing only the fastest connector at that price
+            val summaries = charger.connectorPriceSummaries
+                .groupBy { it.pricePerKwh to it.isFree }
+                .map { (_, group) -> group.first() }  // first() is fastest (already sorted desc by kW)
+                .sortedByDescending { it.kilowatts ?: 0.0 }
+                .take(4)
+            val rows: List<Pair<String, Int>>? = if (summaries.size < 2) null else {
+                summaries.map { s ->
+                    val kwLabel = s.kilowatts?.let { "${it.toInt()}kW" } ?: "?kW"
+                    val priceLabel = when {
+                        s.isFree -> "FREE"
+                        session != null && s.kilowatts != null && s.pricePerKwh != null &&
+                            (priceMode == MapPriceMode.OPTIMAL_COST || priceMode == MapPriceMode.STAY_COST) -> {
+                            val sim = KonaChargeCurve.simulate(
+                                session.startSoc.toFloat(), session.targetSoc.toFloat(),
+                                s.kilowatts,
+                                if (priceMode == MapPriceMode.STAY_COST) session.stayMinutes.toDouble() else null,
+                                profile = session.profile
+                            )
+                            val stayMins = if (priceMode == MapPriceMode.STAY_COST) session.stayMinutes.toDouble() else sim.chargeMinutes
+                            val cost = KonaChargeCurve.totalCost(sim, s.pricePerKwh,
+                                charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0,
+                                charger.parkingTimeRateMajor ?: 0.0, stayMins)
+                            "%s%.2f".format(currencySymbol, cost)
+                        }
+                        s.pricePerKwh != null -> "%s%.2f".format(currencySymbol, s.pricePerKwh)
+                        else -> "?"
+                    }
+                    val rowColor = when {
+                        s.isFree -> colorFree
+                        s.pricePerKwh == null -> colorGray
+                        s.pricePerKwh < 0.35 -> colorGreen
+                        s.pricePerKwh < 0.55 -> colorOrange
+                        else -> colorRed
+                    }
+                    Pair("$kwLabel  $priceLabel", rowColor)
+                }
+            }
+
             val marker = Marker(mapView).apply {
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
                 title = charger.name
                 snippet = buildString {
                     charger.pricePerKwh?.let { append("%s%.2f/kWh · ".format(currencySymbol, it)) }
                     append(charger.operator.name)
-                    append(if (charger.hasAvailableEvse) " · Available" else " · In use")
+                    val statusText = when {
+                        charger.hasAvailableEvse  -> "Available"
+                        charger.hasOutOfOrderEvse -> "Out of order"
+                        else                      -> "In use"
+                    }
+                    append(" · $statusText")
                 }
-                icon = priceBadgeDrawable(context, charger.pricePerKwh, charger.isStale, currencySymbol = currencySymbol, labelOverride = badgeLabel, isSelected = charger.pk == selectedChargerPk, colorFraction = colorFraction)
+                icon = priceBadgeDrawable(
+                    context, charger.pricePerKwh, charger.isStale,
+                    currencySymbol = currencySymbol,
+                    labelOverride = badgeLabel,
+                    isSelected = charger.pk == selectedChargerPk,
+                    colorFraction = colorFraction,
+                    isFavourite = charger.pk in favouritePks,
+                    isExcluded = charger.pk in excludedPks,
+                    isInUse = !charger.hasAvailableEvse && !charger.hasOutOfOrderEvse,
+                    isOutOfOrder = charger.hasOutOfOrderEvse,
+                    rows = rows
+                )
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
                     dialogCharger = charger
@@ -563,6 +638,32 @@ fun ChargerMapView(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { onToggleFavourite(charger.pk) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                if (charger.pk in favouritePks) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "Toggle favourite",
+                                tint = if (charger.pk in favouritePks) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { onToggleExcluded(charger.pk) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Block,
+                                contentDescription = "Toggle excluded",
+                                tint = if (charger.pk in excludedPks) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        if (charger.pk in favouritePks) Text("Favourite", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE53935))
+                        if (charger.pk in excludedPks) Text("Excluded", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
+                    }
                     charger.connectorPriceSummaries.forEach { summary ->
                         val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
                         val kwLabel = summary.kilowatts?.let { kw ->
@@ -588,32 +689,59 @@ fun ChargerMapView(
                     charger.parkingTimeRateMajor?.let {
                         Text("+ %s%.2f/min idle fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    val kw = charger.maxKilowatts
-                    val price = charger.pricePerKwh
-                    if (session != null && kw != null && price != null) {
-                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                        val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
-                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
-                        val optMins = optResult.chargeMinutes.toInt()
-                        val optSoc = optResult.endSocPercent.toInt()
-                        val optLabel = if (optMins >= 180) "≥3h to ${optSoc}%" else "$optMins min → ${optSoc}%"
-                        Text(
-                            "⚡ Optimal: $optLabel  ·  $currencySymbol${"%.2f".format(optCost)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        val staySoc = stayResult.endSocPercent.toInt()
-                        Text(
-                            "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  $currencySymbol${"%.2f".format(stayCost)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    if (session != null) {
+                        val priceGroups = charger.connectorPriceSummaries
+                            .groupBy { it.pricePerKwh to it.isFree }
+                            .map { (_, group) -> group.first() }
+                            .sortedByDescending { it.kilowatts ?: 0.0 }
+                            .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
+                        val multiGroup = priceGroups.size > 1
+                        priceGroups.forEach { s ->
+                            val kw = s.kilowatts!!
+                            val price = if (s.isFree) 0.0 else s.pricePerKwh!!
+                            val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
+                            val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                            val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
+                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                            val optMins = optResult.chargeMinutes.toInt()
+                            val optSoc = optResult.endSocPercent.toInt()
+                            val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
+                            val staySoc = stayResult.endSocPercent.toInt()
+                            val fmt: (Double) -> String = { c -> if (s.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.Top) {
+                                if (multiGroup) {
+                                    Text(
+                                        "${kw.toInt()} kW",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.width(52.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        "⚡ Optimal: $optLabel  ·  ${fmt(optCost)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Text(
-                        if (charger.hasAvailableEvse) "Available" else "In use",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    val evseNodes = charger.evses.edges.map { it.node }
+                    val nAvail = evseNodes.count { it.status == "AVAILABLE" }
+                    val nFault = evseNodes.count { it.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER") }
+                    val nInUse = evseNodes.size - nAvail - nFault
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (nAvail > 0) Text("$nAvail available", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
+                        if (nInUse > 0) Text("$nInUse in use", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF57F17))
+                        if (nFault > 0) Text("$nFault fault${if (nFault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                    }
                     if (charger.isStale) {
                         Text(
                             "! Cached data may be out of date",
@@ -712,23 +840,29 @@ private fun lerpColor(a: Int, b: Int, t: Float): Int {
     )
 }
 
-private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolean = false, currencySymbol: String = "€", labelOverride: String? = null, isSelected: Boolean = false, colorFraction: Float? = null): Drawable {
+private fun priceBadgeDrawable(
+    context: Context, price: Double?, isStale: Boolean = false,
+    currencySymbol: String = "€", labelOverride: String? = null,
+    isSelected: Boolean = false, colorFraction: Float? = null,
+    isFavourite: Boolean = false, isExcluded: Boolean = false,
+    isInUse: Boolean = false, isOutOfOrder: Boolean = false,
+    rows: List<Pair<String, Int>>? = null
+): Drawable {
     val dp = context.resources.displayMetrics.density
     val border = if (isSelected) (3 * dp) else 0f
-    val w = (68 * dp).toInt() + (border * 2).toInt()
-    val h = (32 * dp).toInt() + (border * 2).toInt()
     val r = 8 * dp
+    val isMultiRow = rows != null && rows.size > 1
+    val rowH = 18 * dp
+    val padV = 3 * dp
 
-    val green = android.graphics.Color.rgb(46, 125, 50)
-    val orange = android.graphics.Color.rgb(230, 119, 0)
-    val red = android.graphics.Color.rgb(183, 28, 28)
-    val bgColor = when {
-        colorFraction != null -> if (colorFraction < 0.5f) lerpColor(green, orange, colorFraction * 2f) else lerpColor(orange, red, (colorFraction - 0.5f) * 2f)
-        price == null -> android.graphics.Color.rgb(100, 100, 100)
-        price == 0.0 -> android.graphics.Color.rgb(27, 94, 32)
-        price < 0.35 -> green
-        price < 0.55 -> orange
-        else -> red
+    val w: Int
+    val h: Int
+    if (isMultiRow) {
+        w = (84 * dp).toInt() + (border * 2).toInt()
+        h = (rowH * rows!!.size + padV * 2).toInt() + (border * 2).toInt()
+    } else {
+        w = (68 * dp).toInt() + (border * 2).toInt()
+        h = (32 * dp).toInt() + (border * 2).toInt()
     }
 
     val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -739,24 +873,108 @@ private fun priceBadgeDrawable(context: Context, price: Double?, isStale: Boolea
         canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r + border, r + border, borderPaint)
     }
 
-    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bgColor }
-    canvas.drawRoundRect(border, border, w - border, h - border, r, r, bgPaint)
+    if (isMultiRow) {
+        canvas.save()
+        val clipPath = android.graphics.Path().apply {
+            addRoundRect(border, border, w - border, h - border, r, r, android.graphics.Path.Direction.CW)
+        }
+        canvas.clipPath(clipPath)
+        rows!!.forEachIndexed { i, (label, bgColor) ->
+            val rowTop = border + padV + i * rowH
+            val rowBottom = rowTop + rowH
+            canvas.drawRect(border, rowTop, w - border, rowBottom,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bgColor })
+            if (i < rows.size - 1) {
+                canvas.drawRect(border, rowBottom - dp * 0.5f, w - border, rowBottom,
+                    Paint().apply { color = android.graphics.Color.argb(80, 255, 255, 255) })
+            }
+            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                textSize = 11 * dp
+                textAlign = Paint.Align.CENTER
+                isFakeBoldText = true
+            }
+            canvas.drawText(label, w / 2f, rowTop + rowH / 2f - (tp.descent() + tp.ascent()) / 2f, tp)
+        }
+        canvas.restore()
+    } else {
+        val green = android.graphics.Color.rgb(46, 125, 50)
+        val orange = android.graphics.Color.rgb(230, 119, 0)
+        val red = android.graphics.Color.rgb(183, 28, 28)
+        val bgColor = when {
+            colorFraction != null -> if (colorFraction < 0.5f) lerpColor(green, orange, colorFraction * 2f)
+                                     else lerpColor(orange, red, (colorFraction - 0.5f) * 2f)
+            price == null -> android.graphics.Color.rgb(100, 100, 100)
+            price == 0.0  -> android.graphics.Color.rgb(27, 94, 32)
+            price < 0.35  -> green
+            price < 0.55  -> orange
+            else           -> red
+        }
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bgColor }
+        canvas.drawRoundRect(border, border, w - border, h - border, r, r, bgPaint)
 
-    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
-        textSize = 13 * dp
-        textAlign = Paint.Align.CENTER
-        isFakeBoldText = true
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = 13 * dp
+            textAlign = Paint.Align.CENTER
+            isFakeBoldText = true
+        }
+        val staleTag = if (isStale) "!" else ""
+        val label = labelOverride?.let { "$it$staleTag" } ?: when {
+            price == null -> "?$staleTag"
+            price == 0.0  -> "FREE$staleTag"
+            else           -> "%s%.2f$staleTag".format(currencySymbol, price)
+        }
+        canvas.drawText(label, w / 2f, h / 2f - (textPaint.descent() + textPaint.ascent()) / 2f, textPaint)
     }
-    val staleTag = if (isStale) "!" else ""
-    val label = labelOverride?.let { "$it$staleTag" } ?: when {
-        price == null -> "?$staleTag"
-        price == 0.0 -> "FREE$staleTag"
-        else -> "%s%.2f$staleTag".format(currencySymbol, price)
+
+    if (!isSelected) {
+        val strokeColor: Int? = when {
+            isOutOfOrder -> android.graphics.Color.rgb(183, 28, 28)
+            isInUse      -> android.graphics.Color.rgb(230, 130, 0)
+            else         -> null
+        }
+        if (strokeColor != null) {
+            // Draw at (0,0,w,h) so the outer half clips to the bitmap edge — corners align exactly with badge shape.
+            // White halo (wider) drawn first so the coloured ring is visible on any background colour.
+            canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r, r, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 5f * dp
+            })
+            canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r, r, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = strokeColor
+                style = Paint.Style.STROKE
+                strokeWidth = 3f * dp
+            })
+        }
     }
-    val cx = w / 2f
-    val cy = h / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
-    canvas.drawText(label, cx, cy, textPaint)
+
+    fun drawSymbol(symbol: String, x: Float, y: Float, align: Paint.Align, fillColor: Int) {
+        val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 11 * dp; textAlign = align
+            color = android.graphics.Color.argb(200, 0, 0, 0)
+            style = Paint.Style.STROKE; strokeWidth = 2.5f * dp; strokeJoin = Paint.Join.ROUND
+        }
+        canvas.drawText(symbol, x, y, outline)
+        canvas.drawText(symbol, x, y, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 11 * dp; textAlign = align
+            color = fillColor; style = Paint.Style.FILL; isFakeBoldText = true
+        })
+    }
+
+    val symY = if (isMultiRow) border + padV + rowH / 2f + 4 * dp else border + 11 * dp
+
+    if (isInUse || isOutOfOrder) {
+        drawSymbol(if (isOutOfOrder) "✕" else "⚡", border + 2 * dp, symY,
+            Paint.Align.LEFT, android.graphics.Color.WHITE)
+    }
+    if (isFavourite || isExcluded) {
+        drawSymbol(
+            if (isFavourite) "♥" else "✕", w - border - 2 * dp, symY, Paint.Align.RIGHT,
+            if (isFavourite) android.graphics.Color.rgb(255, 100, 100) else android.graphics.Color.WHITE
+        )
+    }
 
     return BitmapDrawable(context.resources, bitmap)
 }

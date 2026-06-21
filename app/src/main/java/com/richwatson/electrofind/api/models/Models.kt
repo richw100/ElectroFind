@@ -121,6 +121,10 @@ data class ChargingLocation(
         return evses.edges.any { it.node.status == "AVAILABLE" }
     }
 
+    val hasOutOfOrderEvse: Boolean get() = evses.edges.any {
+        it.node.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER")
+    }
+
     val connectorPriceSummaries: List<ConnectorPriceSummary> get() {
         return evses.edges
             .flatMap { it.node.connectors.edges.map { e -> e.node } }

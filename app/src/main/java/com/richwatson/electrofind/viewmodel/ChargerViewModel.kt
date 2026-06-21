@@ -61,7 +61,11 @@ data class SearchState(
     val searchHistory: List<SearchHistoryEntry> = emptyList(),
     val selectedChargerPk: Long? = null,
     val activeProfile: CarProfile = CarProfile.KONA_LR,
-    val profiles: List<CarProfile> = listOf(CarProfile.KONA_LR)
+    val profiles: List<CarProfile> = listOf(CarProfile.KONA_LR),
+    val favouritePks: Set<Long> = emptySet(),
+    val excludedPks: Set<Long> = emptySet(),
+    val showOnlyFavourites: Boolean = false,
+    val hideExcluded: Boolean = false
 ) {
     val isLoading: Boolean get() = isLoadingEv
 }
@@ -102,7 +106,9 @@ class ChargerViewModel(
                 stayMinutes = appPreferences.stayMinutes,
                 searchHistory = loadSearchHistory(),
                 profiles = allProfiles,
-                activeProfile = activeProfile
+                activeProfile = activeProfile,
+                favouritePks = appPreferences.favouritePks,
+                excludedPks = appPreferences.excludedPks
             )
         }
     }
@@ -111,6 +117,8 @@ class ChargerViewModel(
         get() {
             val s = _state.value
             var list = s.chargers
+            if (s.showOnlyFavourites) list = list.filter { it.pk in s.favouritePks }
+            if (s.hideExcluded) list = list.filter { it.pk !in s.excludedPks }
             list = when (s.speedFilter) {
                 SpeedFilter.ALL -> list
                 SpeedFilter.FAST -> list.filter { it.maxKilowatts?.let { kw -> kw >= 7 } == true }
@@ -286,6 +294,35 @@ class ChargerViewModel(
 
     fun setMaxSpeedFilter(kw: Double?) {
         _state.update { it.copy(maxSpeedKw = kw) }
+    }
+
+    fun toggleFavourite(pk: Long) {
+        val current = _state.value.favouritePks.toMutableSet()
+        if (pk in current) current.remove(pk) else current.add(pk)
+        appPreferences.favouritePks = current
+        _state.update { it.copy(favouritePks = current) }
+    }
+
+    fun toggleExcluded(pk: Long) {
+        val currentExcluded = _state.value.excludedPks.toMutableSet()
+        if (pk in currentExcluded) {
+            currentExcluded.remove(pk)
+        } else {
+            currentExcluded.add(pk)
+            val currentFavs = _state.value.favouritePks.toMutableSet().also { it.remove(pk) }
+            appPreferences.favouritePks = currentFavs
+            _state.update { it.copy(favouritePks = currentFavs) }
+        }
+        appPreferences.excludedPks = currentExcluded
+        _state.update { it.copy(excludedPks = currentExcluded) }
+    }
+
+    fun setShowOnlyFavourites(on: Boolean) {
+        _state.update { it.copy(showOnlyFavourites = on) }
+    }
+
+    fun setHideExcluded(on: Boolean) {
+        _state.update { it.copy(hideExcluded = on) }
     }
 
     fun toggleConnectorFilter(connector: String) {

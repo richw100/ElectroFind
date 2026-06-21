@@ -47,6 +47,16 @@ class AppPreferences(context: Context) {
         get() = prefs.getString("active_profile_id", CarProfile.KONA_LR_ID) ?: CarProfile.KONA_LR_ID
         set(value) { prefs.edit().putString("active_profile_id", value).apply() }
 
+    var favouritePks: Set<Long>
+        get() = prefs.getString("favourite_pks", "")!!
+            .split(",").mapNotNull { it.toLongOrNull() }.toSet()
+        set(value) { prefs.edit().putString("favourite_pks", value.joinToString(",")).apply() }
+
+    var excludedPks: Set<Long>
+        get() = prefs.getString("excluded_pks", "")!!
+            .split(",").mapNotNull { it.toLongOrNull() }.toSet()
+        set(value) { prefs.edit().putString("excluded_pks", value.joinToString(",")).apply() }
+
     var rawSearchHistory: String
         get() = prefs.getString("search_history", "") ?: ""
         set(value) { prefs.edit().putString("search_history", value).apply() }

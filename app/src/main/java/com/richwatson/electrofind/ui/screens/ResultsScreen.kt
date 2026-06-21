@@ -11,6 +11,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Place
@@ -131,6 +134,20 @@ fun ResultsScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    item {
+                        val nAvailable = chargers.count { it.hasAvailableEvse }
+                        val nOutOfOrder = chargers.count { it.hasOutOfOrderEvse && !it.hasAvailableEvse }
+                        val nInUse = chargers.size - nAvailable - nOutOfOrder
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            if (nAvailable > 0) Text("● $nAvailable available", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                            if (nInUse > 0) Text("● $nInUse in use", style = MaterialTheme.typography.labelSmall, color = Color(0xFFF57F17))
+                            if (nOutOfOrder > 0) Text("● $nOutOfOrder out of order", style = MaterialTheme.typography.labelSmall, color = Color(0xFFB71C1C))
+                        }
+                    }
                     items(chargers, key = { it.pk }) { charger ->
                         val distanceMiles = if (state.searchLat != 0.0 || state.searchLng != 0.0)
                             haversineMiles(state.searchLat, state.searchLng, charger.coordinates.latitude, charger.coordinates.longitude)
@@ -140,7 +157,11 @@ fun ResultsScreen(
                             currencySymbol = state.currencySymbol,
                             session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes, state.activeProfile),
                             distanceMiles = distanceMiles,
-                            onShowOnMap = { onShowOnMap(charger) }
+                            onShowOnMap = { onShowOnMap(charger) },
+                            isFavourite = charger.pk in state.favouritePks,
+                            isExcluded = charger.pk in state.excludedPks,
+                            onToggleFavourite = { chargerViewModel.toggleFavourite(charger.pk) },
+                            onToggleExcluded = { chargerViewModel.toggleExcluded(charger.pk) }
                         )
                     }
                 }
@@ -187,6 +208,21 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true, modifier:
     }
 
     Column(modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = state.showOnlyFavourites,
+                onClick = { vm.setShowOnlyFavourites(!state.showOnlyFavourites) },
+                leadingIcon = { Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text("Favourites only") }
+            )
+            FilterChip(
+                selected = state.hideExcluded,
+                onClick = { vm.setHideExcluded(!state.hideExcluded) },
+                leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text("Hide excluded") }
+            )
+        }
+        Spacer(Modifier.height(6.dp))
         if (showSort) {
             Text("Sort by", style = MaterialTheme.typography.labelMedium)
             Row(
@@ -331,7 +367,17 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true, modifier:
 }
 
 @Composable
-private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€", session: ChargeSession? = null, distanceMiles: Double? = null, onShowOnMap: (() -> Unit)? = null) {
+private fun ChargerCard(
+    charger: ChargingLocation,
+    currencySymbol: String = "€",
+    session: ChargeSession? = null,
+    distanceMiles: Double? = null,
+    onShowOnMap: (() -> Unit)? = null,
+    isFavourite: Boolean = false,
+    isExcluded: Boolean = false,
+    onToggleFavourite: () -> Unit = {},
+    onToggleExcluded: () -> Unit = {}
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -366,13 +412,34 @@ private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€
                         )
                     }
                 }
+                Row {
+                    IconButton(onClick = onToggleFavourite, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            if (isFavourite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = if (isFavourite) "Remove from favourites" else "Add to favourites",
+                            tint = if (isFavourite) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(onClick = onToggleExcluded, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Block,
+                            contentDescription = if (isExcluded) "Remove from excluded" else "Exclude charger",
+                            tint = if (isExcluded) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(6.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val availColor = if (charger.hasAvailableEvse) Color(0xFF2E7D32) else Color(0xFFB71C1C)
-                val availText = if (charger.hasAvailableEvse) "Available" else "In use"
+                val (availText, availColor) = when {
+                    charger.hasAvailableEvse  -> "Available"    to Color(0xFF2E7D32)
+                    charger.hasOutOfOrderEvse -> "Out of order" to Color(0xFFB71C1C)
+                    else                      -> "In use"       to Color(0xFFF57F17)
+                }
                 AssistChip(
                     onClick = {},
                     label = { Text(availText, style = MaterialTheme.typography.labelSmall) },
@@ -412,28 +479,52 @@ private fun ChargerCard(charger: ChargingLocation, currencySymbol: String = "€
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            val kw = charger.maxKilowatts
-            val price = charger.pricePerKwh
-            if (session != null && kw != null && price != null) {
-                val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
-                val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
-                Spacer(Modifier.height(4.dp))
-                val optMins = optResult.chargeMinutes.toInt()
-                val optSoc = optResult.endSocPercent.toInt()
-                val optLabel = if (optMins >= 180) "≥3h to ${optSoc}%" else "$optMins min → ${optSoc}%"
-                Text(
-                    "⚡ Optimal: $optLabel  ·  $currencySymbol${"%.2f".format(optCost)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                val staySoc = stayResult.endSocPercent.toInt()
-                Text(
-                    "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  $currencySymbol${"%.2f".format(stayCost)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            if (session != null) {
+                val priceGroups = charger.connectorPriceSummaries
+                    .groupBy { it.pricePerKwh to it.isFree }
+                    .map { (_, group) -> group.first() }
+                    .sortedByDescending { it.kilowatts ?: 0.0 }
+                    .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
+                if (priceGroups.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    val multiGroup = priceGroups.size > 1
+                    priceGroups.forEach { s ->
+                        val kw = s.kilowatts!!
+                        val price = if (s.isFree) 0.0 else s.pricePerKwh!!
+                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
+                        val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
+                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                        val optMins = optResult.chargeMinutes.toInt()
+                        val optSoc = optResult.endSocPercent.toInt()
+                        val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
+                        val staySoc = stayResult.endSocPercent.toInt()
+                        val fmt: (Double) -> String = { c -> if (s.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
+                        Row(verticalAlignment = Alignment.Top) {
+                            if (multiGroup) {
+                                Text(
+                                    "${kw.toInt()} kW",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.width(52.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    "⚡ Optimal: $optLabel  ·  ${fmt(optCost)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
             }
             if (charger.isStale) {
                 Text(
