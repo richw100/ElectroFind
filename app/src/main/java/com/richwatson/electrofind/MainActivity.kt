@@ -196,7 +196,15 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("results_map") {
-                            ResultsMapScreen(chargerViewModel = chargerViewModel)
+                            ResultsMapScreen(
+                                chargerViewModel = chargerViewModel,
+                                onClear = {
+                                    navController.navigate("browse_map") {
+                                        popUpTo("search")
+                                        launchSingleTop = true
+                                    }
+                                }
+                            )
                         }
                         composable("settings") {
                             SettingsScreen(

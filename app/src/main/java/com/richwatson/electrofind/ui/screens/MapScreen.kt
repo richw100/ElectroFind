@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -69,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -102,10 +104,18 @@ fun BrowseMapScreen(
     val state by chargerViewModel.state.collectAsState()
     val suggestions by chargerViewModel.suggestions.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     var searchText by remember { mutableStateOf("") }
     var suggestionsExpanded by remember { mutableStateOf(false) }
     var pendingCenter by remember { mutableStateOf<GeoPoint?>(null) }
     var fieldFocused by remember { mutableStateOf(false) }
+    // Tracks the visible map centre so "Search here" always searches where the map is.
+    var mapCenterLat by remember {
+        mutableStateOf(if (state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0) state.savedMapCenterLat else initialLat)
+    }
+    var mapCenterLng by remember {
+        mutableStateOf(if (state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0) state.savedMapCenterLng else initialLng)
+    }
 
     LaunchedEffect(searchText) {
         if (searchText.length >= 2) {
@@ -143,17 +153,42 @@ fun BrowseMapScreen(
             val savedLng = state.savedMapCenterLng
             val hasSaved = savedLat != 0.0 || savedLng != 0.0
             ChargerMapView(
-                chargers = emptyList(),
+                chargers = state.favouriteChargers,
                 searchLat = initialLat,
                 searchLng = initialLng,
                 initialZoom = if (hasSaved) state.savedMapZoom else 8.0,
                 initialCenter = if (hasSaved) GeoPoint(savedLat, savedLng) else null,
                 centerOn = pendingCenter,
-                radiusMiles = state.searchRadiusMiles,
+                radiusMiles = 0,
+                currencySymbol = state.currencySymbol,
+                favouritePks = state.favouritePks,
+                excludedPks = state.excludedPks,
+                onToggleFavourite = { chargerViewModel.toggleFavourite(it) },
+                onToggleExcluded = { chargerViewModel.toggleExcluded(it) },
                 modifier = Modifier.fillMaxSize(),
-                onMapPositionSaved = { zoom, lat, lng -> chargerViewModel.saveMapPosition(zoom, lat, lng) },
+                onMapPositionSaved = { zoom, lat, lng ->
+                    chargerViewModel.saveMapPosition(zoom, lat, lng)
+                    mapCenterLat = lat
+                    mapCenterLng = lng
+                },
+                onMapTapped = {
+                    focusManager.clearFocus()
+                    suggestionsExpanded = false
+                },
                 onLocationSelected = onLocationSelected
             )
+
+            // "Search here" button — searches at whatever the map is centred on
+            ElevatedButton(
+                onClick = { onLocationSelected(mapCenterLat, mapCenterLng, null) },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 80.dp)
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Search here")
+            }
 
             // Search bar overlay
             Card(
@@ -180,7 +215,9 @@ fun BrowseMapScreen(
                                 suggestionsExpanded = false
                                 chargerViewModel.clearSuggestions()
                                 keyboardController?.hide()
-                                onLocationSelected(top.lat, top.lng, top.primaryName)
+                                pendingCenter = GeoPoint(top.lat, top.lng)
+                                mapCenterLat = top.lat
+                                mapCenterLng = top.lng
                             } else {
                                 chargerViewModel.fetchSuggestions(searchText)
                                 suggestionsExpanded = true
@@ -193,13 +230,15 @@ fun BrowseMapScreen(
                                     suggestionsExpanded = false
                                     chargerViewModel.clearSuggestions()
                                     keyboardController?.hide()
-                                    onLocationSelected(top.lat, top.lng, top.primaryName)
+                                    pendingCenter = GeoPoint(top.lat, top.lng)
+                                    mapCenterLat = top.lat
+                                    mapCenterLng = top.lng
                                 } else {
                                     chargerViewModel.fetchSuggestions(searchText)
                                     suggestionsExpanded = true
                                 }
                             }) {
-                                Icon(Icons.Default.Search, contentDescription = "Search")
+                                Icon(Icons.Default.Search, contentDescription = "Go to location")
                             }
                         }
                     )
@@ -207,23 +246,45 @@ fun BrowseMapScreen(
                         HorizontalDivider()
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
                             items(suggestions) { suggestion ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                suggestionsExpanded = false
+                                                chargerViewModel.clearSuggestions()
+                                                keyboardController?.hide()
+                                                pendingCenter = GeoPoint(suggestion.lat, suggestion.lng)
+                                                mapCenterLat = suggestion.lat
+                                                mapCenterLng = suggestion.lng
+                                            }
+                                            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp)
+                                    ) {
+                                        Text(suggestion.primaryName, style = MaterialTheme.typography.bodyMedium)
+                                        if (suggestion.secondaryName.isNotEmpty()) {
+                                            Text(
+                                                suggestion.secondaryName,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = {
                                             suggestionsExpanded = false
                                             chargerViewModel.clearSuggestions()
                                             keyboardController?.hide()
                                             onLocationSelected(suggestion.lat, suggestion.lng, suggestion.primaryName)
                                         }
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    Text(suggestion.primaryName, style = MaterialTheme.typography.bodyMedium)
-                                    if (suggestion.secondaryName.isNotEmpty()) {
-                                        Text(
-                                            suggestion.secondaryName,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Search,
+                                            contentDescription = "Search here",
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
@@ -239,7 +300,10 @@ fun BrowseMapScreen(
                                         .fillMaxWidth()
                                         .clickable {
                                             keyboardController?.hide()
-                                            onLocationSelected(entry.lat, entry.lng, entry.label)
+                                            pendingCenter = GeoPoint(entry.lat, entry.lng)
+                                            mapCenterLat = entry.lat
+                                            mapCenterLng = entry.lng
+                                            suggestionsExpanded = false
                                         }
                                         .padding(start = 16.dp, end = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -249,6 +313,19 @@ fun BrowseMapScreen(
                                         style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier.weight(1f).padding(vertical = 10.dp)
                                     )
+                                    IconButton(
+                                        onClick = {
+                                            keyboardController?.hide()
+                                            onLocationSelected(entry.lat, entry.lng, entry.label)
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Search,
+                                            contentDescription = "Search here",
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                     IconButton(onClick = { chargerViewModel.removeFromHistory(entry.label) }) {
                                         Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(18.dp))
                                     }
@@ -266,10 +343,16 @@ fun BrowseMapScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultsMapScreen(
-    chargerViewModel: ChargerViewModel
+    chargerViewModel: ChargerViewModel,
+    onClear: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
-    val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
+    val chargers = remember(state) {
+        val results = chargerViewModel.filteredSortedChargers
+        val resultPks = results.map { it.pk }.toSet()
+        val extraFavourites = state.favouriteChargers.filter { it.pk !in resultPks }
+        results + extraFavourites
+    }
     var showFilters by remember { mutableStateOf(false) }
     var priceMode by remember { mutableStateOf(MapPriceMode.PER_KWH) }
 
@@ -303,6 +386,12 @@ fun ResultsMapScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        chargerViewModel.clearResults()
+                        onClear()
+                    }) {
+                        Icon(Icons.Default.Close, "Clear results")
+                    }
                     IconButton(onClick = { showFilters = !showFilters }) {
                         Icon(Icons.Default.FilterList, "Filter / Sort")
                     }
@@ -369,6 +458,7 @@ fun ChargerMapView(
     onToggleExcluded: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
+    onMapTapped: () -> Unit = {},
     onLocationSelected: ((Double, Double, String?) -> Unit)? = null
 ) {
     val context = LocalContext()
@@ -575,15 +665,16 @@ fun ChargerMapView(
             }
             mapView.overlays.add(marker)
         }
-        if (onLocationSelected != null) {
-            mapView.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
-                override fun singleTapConfirmedHelper(p: GeoPoint) = false
-                override fun longPressHelper(p: GeoPoint): Boolean {
-                    onLocationSelected(p.latitude, p.longitude, null)
-                    return true
-                }
-            }))
-        }
+        mapView.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
+                onMapTapped()
+                return false
+            }
+            override fun longPressHelper(p: GeoPoint): Boolean {
+                onLocationSelected?.invoke(p.latitude, p.longitude, null)
+                return onLocationSelected != null
+            }
+        }))
 
         mapView.invalidate()
     }

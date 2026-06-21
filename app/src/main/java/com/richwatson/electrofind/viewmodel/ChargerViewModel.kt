@@ -65,7 +65,8 @@ data class SearchState(
     val favouritePks: Set<Long> = emptySet(),
     val excludedPks: Set<Long> = emptySet(),
     val showOnlyFavourites: Boolean = false,
-    val hideExcluded: Boolean = false
+    val hideExcluded: Boolean = false,
+    val favouriteChargers: List<ChargingLocation> = emptyList()
 ) {
     val isLoading: Boolean get() = isLoadingEv
 }
@@ -111,6 +112,7 @@ class ChargerViewModel(
                 excludedPks = appPreferences.excludedPks
             )
         }
+        loadFavouriteChargers(appPreferences.favouritePks)
     }
 
     val filteredSortedChargers: List<ChargingLocation>
@@ -301,6 +303,7 @@ class ChargerViewModel(
         if (pk in current) current.remove(pk) else current.add(pk)
         appPreferences.favouritePks = current
         _state.update { it.copy(favouritePks = current) }
+        loadFavouriteChargers(current)
     }
 
     fun toggleExcluded(pk: Long) {
@@ -312,9 +315,21 @@ class ChargerViewModel(
             val currentFavs = _state.value.favouritePks.toMutableSet().also { it.remove(pk) }
             appPreferences.favouritePks = currentFavs
             _state.update { it.copy(favouritePks = currentFavs) }
+            loadFavouriteChargers(currentFavs)
         }
         appPreferences.excludedPks = currentExcluded
         _state.update { it.copy(excludedPks = currentExcluded) }
+    }
+
+    private fun loadFavouriteChargers(pks: Set<Long>) {
+        viewModelScope.launch {
+            if (pks.isEmpty()) {
+                _state.update { it.copy(favouriteChargers = emptyList()) }
+                return@launch
+            }
+            val chargers = repository.getChargersByPks(pks)
+            _state.update { it.copy(favouriteChargers = chargers) }
+        }
     }
 
     fun setShowOnlyFavourites(on: Boolean) {

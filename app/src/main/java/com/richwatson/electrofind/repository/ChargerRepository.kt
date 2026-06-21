@@ -336,6 +336,42 @@ class ChargerRepository(
         }
     }
 
+    suspend fun getChargersByPks(pks: Set<Long>): List<ChargingLocation> = withContext(Dispatchers.IO) {
+        if (pks.isEmpty()) return@withContext emptyList()
+        val cached = dao.getByPks(pks.toList()).associateBy { it.pk }
+        val result = mutableListOf<ChargingLocation>()
+        val missing = mutableListOf<Long>()
+        for (pk in pks) {
+            val entity = cached[pk]
+            if (entity != null) {
+                result.add(gson.fromJson(entity.json, ChargingLocation::class.java).copy(cachedAt = entity.cachedAt))
+            } else {
+                missing.add(pk)
+            }
+        }
+        if (missing.isNotEmpty()) {
+            coroutineScope {
+                missing.map { pk ->
+                    async {
+                        try {
+                            val charger = fetchChargingLocation(pk.toString()) ?: return@async null
+                            val now = System.currentTimeMillis()
+                            dao.upsert(CachedChargerEntity(
+                                pk = charger.pk,
+                                lat = charger.coordinates.latitude,
+                                lng = charger.coordinates.longitude,
+                                cachedAt = now,
+                                json = gson.toJson(charger)
+                            ))
+                            charger.copy(cachedAt = now)
+                        } catch (e: Exception) { null }
+                    }
+                }.awaitAll().filterNotNull().forEach { result.add(it) }
+            }
+        }
+        result
+    }
+
     suspend fun fetchChargingLocation(pk: String): ChargingLocation? = withContext(Dispatchers.IO) {
         try {
             val request = GraphQLRequest(
