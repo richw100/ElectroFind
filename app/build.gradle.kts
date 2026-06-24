@@ -13,17 +13,30 @@ android {
         applicationId = "com.richwatson.electrofind"
         minSdk = 24
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.14"
+        versionCode = 24
+        versionName = "1.23"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../electrofind-release.jks")
+            storePassword = "electrofind123"
+            keyAlias = "electrofind"
+            keyPassword = "electrofind123"
+        }
+    }
+
     buildTypes {
+        debug {
+            resValue("string", "app_name", "ElectroFind Debug")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -44,6 +57,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.applicationId.set("com.richw.electrofind.app")
     }
 }
 
@@ -79,6 +98,9 @@ dependencies {
 
     // Map
     implementation("org.osmdroid:osmdroid-android:6.1.18")
+
+    // Android Auto
+    implementation("androidx.car.app:app:1.7.0")
 
     // Local cache (Room)
     val roomVersion = "2.6.1"

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -22,16 +24,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,6 +46,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -62,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 
@@ -69,10 +77,14 @@ import com.richwatson.electrofind.viewmodel.ChargerViewModel
 @Composable
 fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
     val state by chargerViewModel.state.collectAsState()
+    val trips = state.trips
+    val activeTrip = state.activeTrip
     val stops = state.routeStops
     var infoCharger by remember { mutableStateOf<ChargingLocation?>(null) }
     var infoSession by remember { mutableStateOf<ChargeSession?>(null) }
     var editStop by remember { mutableStateOf<RouteStop?>(null) }
+    var renameTripId by remember { mutableStateOf<String?>(null) }
+    var copyStopId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -88,77 +100,88 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
             )
         }
     ) { padding ->
-        if (stops.isEmpty()) {
-            Box(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Route,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
-                    Text(
-                        "No stops yet",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Find chargers in the Search or Map tabs and tap \"Add to route\".",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                }
+        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+            if (trips.isNotEmpty()) {
+                TripTabRow(
+                    trips = trips,
+                    activeTripId = activeTrip?.id,
+                    onSelect = { chargerViewModel.setActiveTripId(it) },
+                    onAddTrip = { chargerViewModel.addTrip("Trip ${trips.size + 1}") },
+                    onTapActive = { renameTripId = activeTrip?.id }
+                )
+                HorizontalDivider()
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                itemsIndexed(stops, key = { _, s -> s.id }) { idx, stop ->
-                    val charger = state.routeChargers[stop.activePk]
-                    RouteStopCard(
-                        stop = stop,
-                        position = idx,
-                        totalStops = stops.size,
-                        charger = charger,
-                        currencySymbol = state.currencySymbol,
-                        allChargers = state.routeChargers,
-                        onMoveUp = { chargerViewModel.moveRouteStop(stop.id, -1) },
-                        onMoveDown = { chargerViewModel.moveRouteStop(stop.id, +1) },
-                        onRemove = { chargerViewModel.removeFromRoute(stop.id) },
-                        onSetActive = { chargerViewModel.setActiveCharger(stop.id, it) },
-                        onRemoveAlternative = { chargerViewModel.removeAlternative(stop.id, it) },
-                        onNameChanged = { chargerViewModel.updateRouteStopName(stop.id, it) },
-                        onEditSession = { editStop = stop },
-                        onShowInfo = {
-                            infoCharger = charger
-                            infoSession = ChargeSession(
-                                stop.arrivalSocPercent,
-                                stop.departureSocPercent,
-                                stop.stayMinutes,
-                                state.activeProfile
-                            )
-                        },
-                        onToggleFavourite = { chargerViewModel.toggleFavourite(stop.activePk) },
-                        onToggleExcluded = { chargerViewModel.toggleExcluded(stop.activePk) },
-                        isFavourite = stop.activePk in state.favouritePks,
-                        isExcluded = stop.activePk in state.excludedPks
-                    )
+
+            if (stops.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Route,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        )
+                        Text(
+                            if (trips.isEmpty()) "No stops yet"
+                            else "No stops in ${activeTrip?.name ?: "this trip"}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Find chargers in the Search or Map tabs and tap \"Add to route\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    itemsIndexed(stops, key = { _, s -> s.id }) { idx, stop ->
+                        val charger = state.routeChargers[stop.activePk]
+                        RouteStopCard(
+                            stop = stop,
+                            position = idx,
+                            totalStops = stops.size,
+                            charger = charger,
+                            currencySymbol = state.currencySymbol,
+                            allChargers = state.routeChargers,
+                            onMoveUp = { chargerViewModel.moveRouteStop(stop.id, -1) },
+                            onMoveDown = { chargerViewModel.moveRouteStop(stop.id, +1) },
+                            onRemove = { chargerViewModel.removeFromRoute(stop.id) },
+                            onSetActive = { chargerViewModel.setActiveCharger(stop.id, it) },
+                            onRemoveAlternative = { chargerViewModel.removeAlternative(stop.id, it) },
+                            onNameChanged = { chargerViewModel.updateRouteStopName(stop.id, it) },
+                            onEditSession = { editStop = stop },
+                            onShowInfo = {
+                                infoCharger = charger
+                                infoSession = ChargeSession(
+                                    stop.arrivalSocPercent,
+                                    stop.departureSocPercent,
+                                    stop.stayMinutes,
+                                    state.activeProfile
+                                )
+                            },
+                            onToggleFavourite = { chargerViewModel.toggleFavourite(stop.activePk) },
+                            onToggleExcluded = { chargerViewModel.toggleExcluded(stop.activePk) },
+                            isFavourite = stop.activePk in state.favouritePks,
+                            isExcluded = stop.activePk in state.excludedPks,
+                            onCopyStop = if (trips.size > 1) { { copyStopId = stop.id } } else null
+                        )
+                    }
                 }
             }
         }
     }
 
-    // Edit SoC / stay time dialog
     editStop?.let { stop ->
         RouteStopEditDialog(
             stop = stop,
@@ -170,7 +193,6 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
         )
     }
 
-    // Charger info dialog
     infoCharger?.let { charger ->
         ChargerInfoDialog(
             charger = charger,
@@ -183,6 +205,171 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
             onDismiss = { infoCharger = null }
         )
     }
+
+    copyStopId?.let { stopId ->
+        CopyStopDialog(
+            currentTripId = activeTrip?.id,
+            trips = trips,
+            onCopy = { targetTripId ->
+                chargerViewModel.copyStopToTrip(stopId, targetTripId)
+                copyStopId = null
+            },
+            onDismiss = { copyStopId = null }
+        )
+    }
+
+    renameTripId?.let { tripId ->
+        val trip = trips.find { it.id == tripId }
+        val tripIndex = trips.indexOfFirst { it.id == tripId }
+        if (trip != null) {
+            RenameTripDialog(
+                trip = trip,
+                tripIndex = tripIndex,
+                tripCount = trips.size,
+                onRename = { newName -> chargerViewModel.renameTrip(tripId, newName); renameTripId = null },
+                onDelete = { chargerViewModel.deleteTrip(tripId); renameTripId = null },
+                onMoveLeft = { chargerViewModel.reorderTrip(tripId, -1) },
+                onMoveRight = { chargerViewModel.reorderTrip(tripId, +1) },
+                onDismiss = { renameTripId = null }
+            )
+        }
+    }
+}
+
+@Composable
+private fun TripTabRow(
+    trips: List<Trip>,
+    activeTripId: String?,
+    onSelect: (String) -> Unit,
+    onAddTrip: () -> Unit,
+    onTapActive: () -> Unit
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        items(trips, key = { it.id }) { trip ->
+            val isActive = trip.id == activeTripId
+            FilterChip(
+                selected = isActive,
+                onClick = { if (isActive) onTapActive() else onSelect(trip.id) },
+                label = {
+                    val stopCount = trip.stops.size
+                    Text(
+                        if (stopCount > 0) "${trip.name} ($stopCount)" else trip.name,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            )
+        }
+        item {
+            AssistChip(
+                onClick = onAddTrip,
+                label = { Text("+ Trip", style = MaterialTheme.typography.labelSmall) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RenameTripDialog(
+    trip: Trip,
+    tripIndex: Int,
+    tripCount: Int,
+    onRename: (String) -> Unit,
+    onDelete: () -> Unit,
+    onMoveLeft: () -> Unit,
+    onMoveRight: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember(trip.id) { mutableStateOf(trip.name) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete trip?") },
+            text = {
+                val n = trip.stops.size
+                Text("\"${trip.name}\" and its $n stop${if (n == 1) "" else "s"} will be removed.")
+            },
+            confirmButton = {
+                TextButton(onClick = onDelete) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Trip options") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Name") },
+                        singleLine = true
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(onClick = onMoveLeft, enabled = tripIndex > 0) {
+                            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Move left")
+                        }
+                        IconButton(onClick = onMoveRight, enabled = tripIndex < tripCount - 1) {
+                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Move right")
+                        }
+                        Text(
+                            "${tripIndex + 1} of $tripCount",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterVertically)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { onRename(name.ifBlank { trip.name }) }) { Text("Rename") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showDeleteConfirm = true }) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun CopyStopDialog(
+    currentTripId: String?,
+    trips: List<Trip>,
+    onCopy: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val otherTrips = trips.filter { it.id != currentTripId }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Copy stop to trip") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                otherTrips.forEach { trip ->
+                    TextButton(onClick = { onCopy(trip.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(trip.name, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
@@ -204,7 +391,8 @@ private fun RouteStopCard(
     onToggleFavourite: () -> Unit,
     onToggleExcluded: () -> Unit,
     isFavourite: Boolean,
-    isExcluded: Boolean
+    isExcluded: Boolean,
+    onCopyStop: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var nameText by remember(stop.id) { mutableStateOf(stop.customName ?: "") }
@@ -254,6 +442,11 @@ private fun RouteStopCard(
                 }
                 IconButton(onClick = onMoveDown, enabled = position < totalStops - 1, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down", modifier = Modifier.size(18.dp))
+                }
+                if (onCopyStop != null) {
+                    IconButton(onClick = onCopyStop, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy to trip", modifier = Modifier.size(18.dp))
+                    }
                 }
                 IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Close, contentDescription = "Remove stop", modifier = Modifier.size(18.dp))
@@ -416,7 +609,6 @@ private fun RouteStopCard(
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    // Favourite / exclude icons
                     IconButton(onClick = onToggleFavourite, modifier = Modifier.size(28.dp)) {
                         Icon(
                             if (isFavourite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -438,7 +630,7 @@ private fun RouteStopCard(
 
             if (charger != null) {
                 Text(
-                    "To add an alternative charger for this stop, find it in Search or Map and tap \"Add to route\" → \"Add as alternative to #${position + 1}\".",
+                    "To add an alternative charger for this stop, find it in Search or Map and tap \"Add to route\" → \"Alt. for #${position + 1}\".",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )

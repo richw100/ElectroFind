@@ -5,7 +5,10 @@ import android.location.Geocoder
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.model.CarProfile
+import com.richwatson.electrofind.model.CustomCharger
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.model.Trip
+import com.richwatson.electrofind.model.toChargingLocation
 import com.richwatson.electrofind.repository.CarProfileRepository
 import com.richwatson.electrofind.util.KonaChargeCurve
 import androidx.lifecycle.ViewModel
@@ -70,10 +73,17 @@ data class SearchState(
     val showOnlyFavourites: Boolean = false,
     val hideExcluded: Boolean = false,
     val favouriteChargers: List<ChargingLocation> = emptyList(),
-    val routeStops: List<RouteStop> = emptyList(),
-    val routeChargers: Map<Long, ChargingLocation> = emptyMap()
+    val trips: List<Trip> = emptyList(),
+    val activeTripId: String? = null,
+    val routeChargers: Map<Long, ChargingLocation> = emptyMap(),
+    val customChargers: List<ChargingLocation> = emptyList(),
+    val rawCustomChargers: List<CustomCharger> = emptyList()
 ) {
     val isLoading: Boolean get() = isLoadingEv
+    val routeStops: List<RouteStop>
+        get() = trips.find { it.id == activeTripId }?.stops ?: trips.firstOrNull()?.stops ?: emptyList()
+    val activeTrip: Trip?
+        get() = trips.find { it.id == activeTripId } ?: trips.firstOrNull()
 }
 
 class ChargerViewModel(
@@ -119,18 +129,19 @@ class ChargerViewModel(
             )
         }
         loadFavouriteChargers(appPreferences.favouritePks)
-        val stops = loadRoutePlan()
-        if (stops.isNotEmpty()) {
-            _state.update { it.copy(routeStops = stops) }
-            loadRouteChargers(stops.flatMap { it.chargerPks }.toSet())
-        }
+        val trips = loadTripsFromPrefs()
+        val activeTripId = trips.firstOrNull()?.id
+        _state.update { it.copy(trips = trips, activeTripId = activeTripId) }
+        loadRouteChargers(trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet())
+        val raw = loadRawCustomChargers()
+        _state.update { it.copy(rawCustomChargers = raw, customChargers = raw.map { c -> c.toChargingLocation() }) }
     }
 
     val filteredSortedChargers: List<ChargingLocation>
         get() {
             val s = _state.value
-            var list = s.chargers
-            if (s.showOnlyFavourites) list = list.filter { it.pk in s.favouritePks }
+            var list = s.chargers + s.customChargers
+            if (s.showOnlyFavourites) list = list.filter { it.pk in s.favouritePks || it.pk < 0 }
             if (s.hideExcluded) list = list.filter { it.pk !in s.excludedPks }
             list = when (s.speedFilter) {
                 SpeedFilter.ALL -> list
@@ -370,19 +381,75 @@ class ChargerViewModel(
         _state.update { it.copy(startSocPercent = startSoc, targetSocPercent = targetSoc, stayMinutes = stayMinutes) }
     }
 
-    // ── Route planner ────────────────────────────────────────────────────────
+    // ── Custom chargers ──────────────────────────────────────────────────────
 
-    private fun loadRoutePlan(): List<RouteStop> {
-        val raw = appPreferences.rawRoutePlan
-        if (raw.isEmpty()) return emptyList()
+    fun addCustomCharger(c: CustomCharger) {
+        val new = c.copy(id = -System.currentTimeMillis())
+        val current = loadRawCustomChargers().toMutableList()
+        current.add(new)
+        saveRawCustomChargers(current)
+        _state.update { it.copy(rawCustomChargers = current, customChargers = current.map { ch -> ch.toChargingLocation() }) }
+    }
+
+    fun updateCustomCharger(c: CustomCharger) {
+        val current = loadRawCustomChargers().toMutableList()
+        val idx = current.indexOfFirst { it.id == c.id }
+        if (idx >= 0) current[idx] = c else current.add(c)
+        saveRawCustomChargers(current)
+        _state.update { it.copy(rawCustomChargers = current, customChargers = current.map { ch -> ch.toChargingLocation() }) }
+    }
+
+    fun deleteCustomCharger(id: Long) {
+        val current = loadRawCustomChargers().filter { it.id != id }
+        saveRawCustomChargers(current)
+        _state.update { it.copy(rawCustomChargers = current, customChargers = current.map { it.toChargingLocation() }) }
+    }
+
+    private fun loadRawCustomChargers(): List<CustomCharger> {
+        val raw = appPreferences.rawCustomChargers
         return try {
-            val type = object : TypeToken<List<RouteStop>>() {}.type
-            gson.fromJson<List<RouteStop>>(raw, type) ?: emptyList()
+            val type = object : TypeToken<List<CustomCharger>>() {}.type
+            gson.fromJson<List<CustomCharger>>(raw, type) ?: emptyList()
         } catch (e: Exception) { emptyList() }
     }
 
-    private fun saveRoutePlan(stops: List<RouteStop>) {
-        appPreferences.rawRoutePlan = gson.toJson(stops)
+    private fun saveRawCustomChargers(list: List<CustomCharger>) {
+        appPreferences.rawCustomChargers = gson.toJson(list)
+    }
+
+    // ── Route planner / Trips ────────────────────────────────────────────────
+
+    private fun loadTripsFromPrefs(): List<Trip> {
+        val raw = appPreferences.rawTrips
+        // New-format trips
+        if (raw.isNotEmpty() && raw != "[]") {
+            return try {
+                val type = object : TypeToken<List<Trip>>() {}.type
+                gson.fromJson<List<Trip>>(raw, type) ?: emptyList()
+            } catch (e: Exception) { emptyList() }
+        }
+        // Migrate from old rawRoutePlan
+        val oldRaw = appPreferences.rawRoutePlan
+        if (oldRaw.isNotEmpty()) {
+            return try {
+                val type = object : TypeToken<List<RouteStop>>() {}.type
+                val stops = gson.fromJson<List<RouteStop>>(oldRaw, type) ?: emptyList()
+                if (stops.isEmpty()) emptyList()
+                else {
+                    val trip = Trip(name = "Trip 1", stops = stops)
+                    appPreferences.rawTrips = gson.toJson(listOf(trip))
+                    listOf(trip)
+                }
+            } catch (e: Exception) { emptyList() }
+        }
+        return emptyList()
+    }
+
+    private fun saveTrips(trips: List<Trip>, activeId: String? = _state.value.activeTripId) {
+        appPreferences.rawTrips = gson.toJson(trips)
+        // Keep rawRoutePlan mirroring the active trip for Android Auto
+        val activeStops = trips.find { it.id == activeId }?.stops ?: trips.firstOrNull()?.stops ?: emptyList()
+        appPreferences.rawRoutePlan = gson.toJson(activeStops)
     }
 
     private fun loadRouteChargers(pks: Set<Long>) {
@@ -393,7 +460,56 @@ class ChargerViewModel(
         }
     }
 
-    fun addToRoute(pk: Long) {
+    fun addTrip(name: String): String {
+        val id = java.util.UUID.randomUUID().toString()
+        val trip = Trip(id = id, name = name)
+        val updated = _state.value.trips + trip
+        saveTrips(updated, id)
+        _state.update { it.copy(trips = updated, activeTripId = id) }
+        return id
+    }
+
+    fun renameTrip(id: String, name: String) {
+        val updated = _state.value.trips.map { if (it.id == id) it.copy(name = name) else it }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
+    }
+
+    fun deleteTrip(id: String) {
+        val updated = _state.value.trips.filter { it.id != id }
+        val newActive = if (_state.value.activeTripId == id) updated.firstOrNull()?.id else _state.value.activeTripId
+        saveTrips(updated, newActive)
+        _state.update { it.copy(trips = updated, activeTripId = newActive) }
+    }
+
+    fun setActiveTripId(id: String) {
+        saveTrips(_state.value.trips, id)
+        _state.update { it.copy(activeTripId = id) }
+    }
+
+    fun reorderTrip(id: String, delta: Int) {
+        val trips = _state.value.trips.toMutableList()
+        val idx = trips.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return
+        val newIdx = (idx + delta).coerceIn(0, trips.size - 1)
+        if (newIdx == idx) return
+        val item = trips.removeAt(idx)
+        trips.add(newIdx, item)
+        saveTrips(trips)
+        _state.update { it.copy(trips = trips) }
+    }
+
+    fun copyStopToTrip(stopId: String, targetTripId: String) {
+        val source = _state.value.trips.flatMap { it.stops }.find { it.id == stopId } ?: return
+        val copy = source.copy(id = java.util.UUID.randomUUID().toString())
+        val updated = _state.value.trips.map { trip ->
+            if (trip.id == targetTripId) trip.copy(stops = trip.stops + copy) else trip
+        }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
+        loadRouteChargers(copy.chargerPks.toSet())
+    }
+
+    fun addToRoute(pk: Long, tripId: String) {
         val stop = RouteStop(
             id = java.util.UUID.randomUUID().toString(),
             chargerPks = listOf(pk),
@@ -401,83 +517,90 @@ class ChargerViewModel(
             departureSocPercent = _state.value.targetSocPercent,
             stayMinutes = _state.value.stayMinutes
         )
-        val updated = _state.value.routeStops + stop
-        saveRoutePlan(updated)
-        _state.update { it.copy(routeStops = updated) }
+        val updated = _state.value.trips.map { trip ->
+            if (trip.id == tripId) trip.copy(stops = trip.stops + stop) else trip
+        }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
         loadRouteChargers(setOf(pk))
     }
 
     fun addAlternativeToStop(stopId: String, pk: Long) {
-        val updated = _state.value.routeStops.map { stop ->
-            if (stop.id == stopId && pk !in stop.chargerPks) stop.copy(chargerPks = stop.chargerPks + pk)
-            else stop
+        val updated = updateStopInTrips(stopId) { stop ->
+            if (pk !in stop.chargerPks) stop.copy(chargerPks = stop.chargerPks + pk) else stop
         }
-        saveRoutePlan(updated)
-        _state.update { it.copy(routeStops = updated) }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
         loadRouteChargers(setOf(pk))
     }
 
     fun removeFromRoute(stopId: String) {
-        val updated = _state.value.routeStops.filter { it.id != stopId }
-        saveRoutePlan(updated)
-        _state.update { it.copy(routeStops = updated) }
+        val updated = _state.value.trips.map { trip ->
+            trip.copy(stops = trip.stops.filter { it.id != stopId })
+        }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
     }
 
     fun moveRouteStop(stopId: String, delta: Int) {
-        val stops = _state.value.routeStops.toMutableList()
-        val idx = stops.indexOfFirst { it.id == stopId }
-        if (idx < 0) return
-        val newIdx = (idx + delta).coerceIn(0, stops.size - 1)
-        if (idx != newIdx) {
-            val item = stops.removeAt(idx)
-            stops.add(newIdx, item)
-            saveRoutePlan(stops)
-            _state.update { it.copy(routeStops = stops) }
+        val updated = _state.value.trips.map { trip ->
+            val stops = trip.stops.toMutableList()
+            val idx = stops.indexOfFirst { it.id == stopId }
+            if (idx < 0) return@map trip
+            val newIdx = (idx + delta).coerceIn(0, stops.size - 1)
+            if (idx != newIdx) { val item = stops.removeAt(idx); stops.add(newIdx, item) }
+            trip.copy(stops = stops)
         }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
     }
 
     fun setActiveCharger(stopId: String, index: Int) {
-        val updated = _state.value.routeStops.map { stop ->
-            if (stop.id == stopId) stop.copy(activeIndex = index.coerceIn(0, stop.chargerPks.size - 1))
-            else stop
+        val updated = updateStopInTrips(stopId) { stop ->
+            stop.copy(activeIndex = index.coerceIn(0, stop.chargerPks.size - 1))
         }
-        saveRoutePlan(updated)
-        _state.update { it.copy(routeStops = updated) }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
     }
 
     fun removeAlternative(stopId: String, pk: Long) {
-        val updated = _state.value.routeStops.map { stop ->
-            if (stop.id != stopId) return@map stop
+        val updated = updateStopInTrips(stopId) { stop ->
             val newPks = stop.chargerPks.filter { it != pk }
-            if (newPks.isEmpty()) return@map stop
-            stop.copy(chargerPks = newPks, activeIndex = stop.activeIndex.coerceIn(0, newPks.size - 1))
+            if (newPks.isEmpty()) stop else stop.copy(chargerPks = newPks, activeIndex = stop.activeIndex.coerceIn(0, newPks.size - 1))
         }
-        saveRoutePlan(updated)
-        _state.update { it.copy(routeStops = updated) }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
     }
 
     fun updateRouteStop(stopId: String, arrivalSoc: Int, departureSoc: Int, stayMinutes: Int) {
-        val updated = _state.value.routeStops.map { stop ->
-            if (stop.id == stopId) stop.copy(arrivalSocPercent = arrivalSoc, departureSocPercent = departureSoc, stayMinutes = stayMinutes)
-            else stop
+        val updated = updateStopInTrips(stopId) { stop ->
+            stop.copy(arrivalSocPercent = arrivalSoc, departureSocPercent = departureSoc, stayMinutes = stayMinutes)
         }
-        saveRoutePlan(updated)
-        _state.update { it.copy(routeStops = updated) }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
     }
 
     fun updateRouteStopName(stopId: String, name: String) {
-        val updated = _state.value.routeStops.map { stop ->
-            if (stop.id == stopId) stop.copy(customName = name.takeIf { it.isNotBlank() })
-            else stop
+        val updated = updateStopInTrips(stopId) { stop ->
+            stop.copy(customName = name.takeIf { it.isNotBlank() })
         }
-        saveRoutePlan(updated)
-        _state.update { it.copy(routeStops = updated) }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
     }
 
     fun clearRoute() {
-        saveRoutePlan(emptyList())
-        _state.update { it.copy(routeStops = emptyList()) }
+        val activeId = _state.value.activeTripId
+        val updated = _state.value.trips.map { trip ->
+            if (trip.id == activeId) trip.copy(stops = emptyList()) else trip
+        }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
     }
+
+    private fun updateStopInTrips(stopId: String, transform: (RouteStop) -> RouteStop): List<Trip> =
+        _state.value.trips.map { trip ->
+            trip.copy(stops = trip.stops.map { if (it.id == stopId) transform(it) else it })
+        }
 
     fun clearResults() {
         searchJob?.cancel()

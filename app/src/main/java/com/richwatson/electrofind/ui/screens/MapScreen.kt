@@ -17,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -81,6 +82,7 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import kotlinx.coroutines.delay
@@ -101,6 +103,7 @@ fun BrowseMapScreen(
     initialLng: Double,
     chargerViewModel: ChargerViewModel,
     onLocationSelected: (Double, Double, String?) -> Unit,
+    onAddCustomCharger: ((Double, Double) -> Unit)? = null,
     onBack: () -> Unit
 ) {
     val state by chargerViewModel.state.collectAsState()
@@ -155,7 +158,7 @@ fun BrowseMapScreen(
             val savedLng = state.savedMapCenterLng
             val hasSaved = savedLat != 0.0 || savedLng != 0.0
             ChargerMapView(
-                chargers = state.favouriteChargers,
+                chargers = state.favouriteChargers + state.customChargers,
                 searchLat = initialLat,
                 searchLng = initialLng,
                 initialZoom = if (hasSaved) state.savedMapZoom else 8.0,
@@ -167,9 +170,11 @@ fun BrowseMapScreen(
                 excludedPks = state.excludedPks,
                 onToggleFavourite = { chargerViewModel.toggleFavourite(it) },
                 onToggleExcluded = { chargerViewModel.toggleExcluded(it) },
-                routeStops = state.routeStops,
-                onAddToRoute = { chargerViewModel.addToRoute(it) },
+                trips = state.trips,
+                onAddToRoute = { pk, tripId -> chargerViewModel.addToRoute(pk, tripId) },
                 onAddAlternativeToStop = { stopId, pk -> chargerViewModel.addAlternativeToStop(stopId, pk) },
+                onAddTrip = { name -> chargerViewModel.addTrip(name) },
+                customChargerPks = state.customChargers.map { it.pk }.toSet(),
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -180,7 +185,8 @@ fun BrowseMapScreen(
                     focusManager.clearFocus()
                     suggestionsExpanded = false
                 },
-                onLocationSelected = onLocationSelected
+                onLocationSelected = onLocationSelected,
+                onAddCustomCharger = onAddCustomCharger
             )
 
             // "Search here" button — searches at whatever the map is centred on
@@ -420,9 +426,11 @@ fun ResultsMapScreen(
                 excludedPks = state.excludedPks,
                 onToggleFavourite = { chargerViewModel.toggleFavourite(it) },
                 onToggleExcluded = { chargerViewModel.toggleExcluded(it) },
-                routeStops = state.routeStops,
-                onAddToRoute = { chargerViewModel.addToRoute(it) },
+                trips = state.trips,
+                onAddToRoute = { pk, tripId -> chargerViewModel.addToRoute(pk, tripId) },
                 onAddAlternativeToStop = { stopId, pk -> chargerViewModel.addAlternativeToStop(stopId, pk) },
+                onAddTrip = { name -> chargerViewModel.addTrip(name) },
+                customChargerPks = state.customChargers.map { it.pk }.toSet(),
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -464,18 +472,22 @@ fun ChargerMapView(
     excludedPks: Set<Long> = emptySet(),
     onToggleFavourite: (Long) -> Unit = {},
     onToggleExcluded: (Long) -> Unit = {},
-    routeStops: List<RouteStop> = emptyList(),
-    onAddToRoute: (Long) -> Unit = {},
+    trips: List<Trip> = emptyList(),
+    onAddToRoute: (Long, String) -> Unit = { _, _ -> },
     onAddAlternativeToStop: (String, Long) -> Unit = { _, _ -> },
+    onAddTrip: (String) -> String = { "" },
+    customChargerPks: Set<Long> = emptySet(),
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onMapTapped: () -> Unit = {},
-    onLocationSelected: ((Double, Double, String?) -> Unit)? = null
+    onLocationSelected: ((Double, Double, String?) -> Unit)? = null,
+    onAddCustomCharger: ((Double, Double) -> Unit)? = null
 ) {
     val context = LocalContext()
     var dialogCharger by remember { mutableStateOf<ChargingLocation?>(null) }
     var routeAddCharger by remember { mutableStateOf<ChargingLocation?>(null) }
     var myLocationPoint by remember { mutableStateOf<GeoPoint?>(null) }
+    var longPressPoint by remember { mutableStateOf<GeoPoint?>(null) }
 
     val mapView = remember {
         org.osmdroid.views.MapView(context).apply {
@@ -503,7 +515,8 @@ fun ChargerMapView(
         }
     }
 
-    LaunchedEffect(chargers, radiusMiles, myLocationPoint, currencySymbol, priceMode, session, selectedChargerPk, favouritePks, excludedPks) {
+    LaunchedEffect(chargers, radiusMiles, myLocationPoint, currencySymbol, priceMode, session, selectedChargerPk, favouritePks, excludedPks, customChargerPks, trips) {
+        val routeStops = trips.flatMap { it.stops }
         mapView.overlays.clear()
 
         if (radiusMiles > 0 && (searchLat != 0.0 || searchLng != 0.0)) {
@@ -667,6 +680,7 @@ fun ChargerMapView(
                     isExcluded = charger.pk in excludedPks,
                     isInUse = !charger.hasAvailableEvse && !charger.hasOutOfOrderEvse,
                     isOutOfOrder = charger.hasOutOfOrderEvse,
+                    isCustom = charger.pk in customChargerPks,
                     rows = rows
                 )
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -683,6 +697,10 @@ fun ChargerMapView(
                 return false
             }
             override fun longPressHelper(p: GeoPoint): Boolean {
+                if (onAddCustomCharger != null) {
+                    longPressPoint = p
+                    return true
+                }
                 onLocationSelected?.invoke(p.latitude, p.longitude, null)
                 return onLocationSelected != null
             }
@@ -875,41 +893,45 @@ fun ChargerMapView(
                 }
             },
             confirmButton = {
-                Row {
+                Row(modifier = Modifier.fillMaxWidth()) {
                     val lat = charger.coordinates.latitude
                     val lng = charger.coordinates.longitude
-                    TextButton(onClick = {
-                        val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
-                        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                        dialogCharger = null
-                    }) {
-                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Maps")
-                    }
-                    if (charger.externalId != null) {
-                        TextButton(onClick = {
-                            val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=${charger.externalId}")
+                    TextButton(
+                        onClick = {
+                            val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
                             context.startActivity(Intent(Intent.ACTION_VIEW, uri))
                             dialogCharger = null
-                        }) {
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Maps", style = MaterialTheme.typography.labelMedium)
+                    }
+                    if (charger.externalId != null) {
+                        TextButton(
+                            onClick = {
+                                val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=${charger.externalId}")
+                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                dialogCharger = null
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
                             Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Electroverse")
+                            Text("Electroverse", style = MaterialTheme.typography.labelMedium)
                         }
                     }
-                    TextButton(onClick = {
-                        if (routeStops.isEmpty()) {
-                            onAddToRoute(charger.pk)
-                            dialogCharger = null
-                        } else {
+                    TextButton(
+                        onClick = {
                             routeAddCharger = charger
                             dialogCharger = null
-                        }
-                    }) {
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
                         Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Route")
+                        Text("Route", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             },
@@ -918,12 +940,35 @@ fun ChargerMapView(
     }
 
     routeAddCharger?.let { charger ->
-        AddToRouteDialog(
+        TripPickerDialog(
             pk = charger.pk,
-            routeStops = routeStops,
-            onNewStop = { onAddToRoute(charger.pk); routeAddCharger = null },
+            trips = trips,
+            onAddToTrip = { tripId -> onAddToRoute(charger.pk, tripId); routeAddCharger = null },
             onAddAlternative = { stopId -> onAddAlternativeToStop(stopId, charger.pk); routeAddCharger = null },
+            onAddTrip = { name -> val id = onAddTrip(name); onAddToRoute(charger.pk, id); routeAddCharger = null },
             onDismiss = { routeAddCharger = null }
+        )
+    }
+
+    longPressPoint?.let { p ->
+        AlertDialog(
+            onDismissRequest = { longPressPoint = null },
+            title = { Text("Long press") },
+            text = { Text("${"%.5f".format(p.latitude)}, ${"%.5f".format(p.longitude)}") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val lat = p.latitude; val lng = p.longitude
+                    longPressPoint = null
+                    onAddCustomCharger?.invoke(lat, lng)
+                }) { Text("Add custom charger") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val lat = p.latitude; val lng = p.longitude
+                    longPressPoint = null
+                    onLocationSelected?.invoke(lat, lng, null)
+                }) { Text("Search here") }
+            }
         )
     }
 }
@@ -992,6 +1037,7 @@ private fun priceBadgeDrawable(
     isSelected: Boolean = false, colorFraction: Float? = null,
     isFavourite: Boolean = false, isExcluded: Boolean = false,
     isInUse: Boolean = false, isOutOfOrder: Boolean = false,
+    isCustom: Boolean = false,
     rows: List<Pair<String, Int>>? = null
 ): Drawable {
     val dp = context.resources.displayMetrics.density
@@ -1048,6 +1094,7 @@ private fun priceBadgeDrawable(
         val orange = android.graphics.Color.rgb(230, 119, 0)
         val red = android.graphics.Color.rgb(183, 28, 28)
         val bgColor = when {
+            isCustom -> android.graphics.Color.rgb(0, 105, 130)
             colorFraction != null -> if (colorFraction < 0.5f) lerpColor(green, orange, colorFraction * 2f)
                                      else lerpColor(orange, red, (colorFraction - 0.5f) * 2f)
             price == null -> android.graphics.Color.rgb(100, 100, 100)
@@ -1111,7 +1158,9 @@ private fun priceBadgeDrawable(
 
     val symY = if (isMultiRow) border + padV + rowH / 2f + 4 * dp else border + 11 * dp
 
-    if (isInUse || isOutOfOrder) {
+    if (isCustom) {
+        drawSymbol("★", border + 2 * dp, symY, Paint.Align.LEFT, android.graphics.Color.rgb(255, 220, 50))
+    } else if (isInUse || isOutOfOrder) {
         drawSymbol(if (isOutOfOrder) "✕" else "⚡", border + 2 * dp, symY,
             Paint.Align.LEFT, android.graphics.Color.WHITE)
     }

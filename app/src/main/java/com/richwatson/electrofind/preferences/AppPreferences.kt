@@ -64,4 +64,12 @@ class AppPreferences(context: Context) {
     var rawRoutePlan: String
         get() = prefs.getString("route_plan", "") ?: ""
         set(value) { prefs.edit().putString("route_plan", value).apply() }
+
+    var rawCustomChargers: String
+        get() = prefs.getString("custom_chargers", "[]") ?: "[]"
+        set(value) { prefs.edit().putString("custom_chargers", value).apply() }
+
+    var rawTrips: String
+        get() = prefs.getString("trips", "[]") ?: "[]"
+        set(value) { prefs.edit().putString("trips", value).apply() }
 }

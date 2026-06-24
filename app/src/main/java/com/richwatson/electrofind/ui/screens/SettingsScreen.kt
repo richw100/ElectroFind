@@ -1,10 +1,13 @@
 package com.richwatson.electrofind.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,7 +22,8 @@ import com.richwatson.electrofind.viewmodel.ThemeMode
 fun SettingsScreen(
     chargerViewModel: ChargerViewModel,
     appPreferences: AppPreferences,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onShowCurve: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
     var localStartSoc by remember(state.startSocPercent) { mutableIntStateOf(state.startSocPercent) }
@@ -151,7 +155,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "Upload a charge curve SVG on the Curve tab to add more cars",
+                    "Upload a charge curve SVG in Charge Curve settings to add more cars",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -168,6 +172,37 @@ fun SettingsScreen(
                         label = { Text("$miles mi") }
                     )
                 }
+            }
+
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onShowCurve)
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.ShowChart,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Charge curve", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Upload custom charge curves for additional car profiles",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

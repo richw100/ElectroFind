@@ -7,12 +7,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -31,8 +31,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.richwatson.electrofind.ui.screens.AboutScreen
+import com.richwatson.electrofind.ui.screens.AddEditCustomChargerScreen
 import com.richwatson.electrofind.ui.screens.ChargeCurveScreen
 import com.richwatson.electrofind.ui.screens.BrowseMapScreen
+import com.richwatson.electrofind.ui.screens.CustomChargersScreen
 import com.richwatson.electrofind.ui.screens.LoginScreen
 import com.richwatson.electrofind.ui.screens.ResultsMapScreen
 import com.richwatson.electrofind.ui.screens.ResultsScreen
@@ -123,7 +125,7 @@ class MainActivity : ComponentActivity() {
                                     label = { Text("Route", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
-                                    selected = currentRoute == "settings",
+                                    selected = currentRoute in listOf("settings", "curve"),
                                     onClick = {
                                         navController.navigate("settings") {
                                             popUpTo("search")
@@ -132,17 +134,6 @@ class MainActivity : ComponentActivity() {
                                     },
                                     icon = { Icon(Icons.Default.Settings, null) },
                                     label = { Text("Settings", fontSize = 10.sp) }
-                                )
-                                NavigationBarItem(
-                                    selected = currentRoute == "curve",
-                                    onClick = {
-                                        navController.navigate("curve") {
-                                            popUpTo("search")
-                                            launchSingleTop = true
-                                        }
-                                    },
-                                    icon = { Icon(Icons.Default.ShowChart, null) },
-                                    label = { Text("Curve", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
                                     selected = currentRoute == "about",
@@ -154,6 +145,17 @@ class MainActivity : ComponentActivity() {
                                     },
                                     icon = { Icon(Icons.Default.Info, null) },
                                     label = { Text("About", fontSize = 10.sp) }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute in listOf("custom_chargers", "custom_charger_form"),
+                                    onClick = {
+                                        navController.navigate("custom_chargers") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.AddCircle, null) },
+                                    label = { Text("Mine", fontSize = 10.sp) }
                                 )
                             }
                         }
@@ -197,6 +199,9 @@ class MainActivity : ComponentActivity() {
                                     chargerViewModel.searchByCoordinates(lat, lng, label = label, reverseGeocodePrefix = if (label == null) "Map pin" else null)
                                     navController.navigate("results_map") { launchSingleTop = true }
                                 },
+                                onAddCustomCharger = { lat, lng ->
+                                    navController.navigate("custom_charger_form?lat=$lat&lng=$lng") { launchSingleTop = true }
+                                },
                                 onBack = { navController.popBackStack() }
                             )
                         }
@@ -206,6 +211,9 @@ class MainActivity : ComponentActivity() {
                                 onShowOnMap = { charger ->
                                     chargerViewModel.selectCharger(charger.pk)
                                     navController.navigate("results_map") { launchSingleTop = true }
+                                },
+                                onEditCustomCharger = { id ->
+                                    navController.navigate("custom_charger_form?id=$id") { launchSingleTop = true }
                                 }
                             )
                         }
@@ -227,7 +235,10 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 chargerViewModel = chargerViewModel,
                                 appPreferences = (application as ElectroFindApp).appPreferences,
-                                onBack = { navController.popBackStack() }
+                                onBack = { navController.popBackStack() },
+                                onShowCurve = {
+                                    navController.navigate("curve") { launchSingleTop = true }
+                                }
                             )
                         }
                         composable("curve") {
@@ -235,6 +246,30 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("about") {
                             AboutScreen()
+                        }
+                        composable("custom_chargers") {
+                            CustomChargersScreen(
+                                chargerViewModel = chargerViewModel,
+                                onAddNew = {
+                                    navController.navigate("custom_charger_form") { launchSingleTop = true }
+                                },
+                                onEdit = { id ->
+                                    navController.navigate("custom_charger_form?id=$id") { launchSingleTop = true }
+                                }
+                            )
+                        }
+                        composable("custom_charger_form?id={id}&lat={lat}&lng={lng}") { backStackEntry ->
+                            val id = backStackEntry.arguments?.getString("id")?.toLongOrNull()
+                            val lat = backStackEntry.arguments?.getString("lat")?.toDoubleOrNull()
+                            val lng = backStackEntry.arguments?.getString("lng")?.toDoubleOrNull()
+                            AddEditCustomChargerScreen(
+                                chargerViewModel = chargerViewModel,
+                                existingId = id,
+                                initialLat = lat,
+                                initialLng = lng,
+                                onSave = { navController.popBackStack() },
+                                onCancel = { navController.popBackStack() }
+                            )
                         }
                     }
                 }

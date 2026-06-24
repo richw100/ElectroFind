@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Place
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import com.richwatson.electrofind.viewmodel.SortOrder
@@ -47,12 +49,13 @@ data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes:
 @Composable
 fun ResultsScreen(
     chargerViewModel: ChargerViewModel,
-    onShowOnMap: (ChargingLocation) -> Unit = {}
+    onShowOnMap: (ChargingLocation) -> Unit = {},
+    onEditCustomCharger: ((Long) -> Unit)? = null
 ) {
     val state by chargerViewModel.state.collectAsState()
     val chargers = remember(state) { chargerViewModel.filteredSortedChargers }
     var showFilters by remember { mutableStateOf(false) }
-    var addToRoutePk by remember { mutableStateOf<Long?>(null) }
+    var tripPickerPk by remember { mutableStateOf<Long?>(null) }
 
     Scaffold(
         topBar = {
@@ -165,10 +168,8 @@ fun ResultsScreen(
                             isExcluded = charger.pk in state.excludedPks,
                             onToggleFavourite = { chargerViewModel.toggleFavourite(charger.pk) },
                             onToggleExcluded = { chargerViewModel.toggleExcluded(charger.pk) },
-                            onAddToRoute = { pk ->
-                                if (state.routeStops.isEmpty()) chargerViewModel.addToRoute(pk)
-                                else addToRoutePk = pk
-                            }
+                            onAddToRoute = { pk -> tripPickerPk = pk },
+                            onEditCustomCharger = if (charger.pk < 0) { { onEditCustomCharger?.invoke(charger.pk) } } else null
                         )
                     }
                 }
@@ -176,46 +177,92 @@ fun ResultsScreen(
         }
     }
 
-    // "Add to route" dialog — shown when there are existing stops to choose from
-    addToRoutePk?.let { pk ->
-        AddToRouteDialog(
+    tripPickerPk?.let { pk ->
+        TripPickerDialog(
             pk = pk,
-            routeStops = state.routeStops,
-            onNewStop = { chargerViewModel.addToRoute(pk); addToRoutePk = null },
-            onAddAlternative = { stopId -> chargerViewModel.addAlternativeToStop(stopId, pk); addToRoutePk = null },
-            onDismiss = { addToRoutePk = null }
+            trips = state.trips,
+            onAddToTrip = { tripId -> chargerViewModel.addToRoute(pk, tripId); tripPickerPk = null },
+            onAddAlternative = { stopId -> chargerViewModel.addAlternativeToStop(stopId, pk); tripPickerPk = null },
+            onAddTrip = { name -> val id = chargerViewModel.addTrip(name); chargerViewModel.addToRoute(pk, id); tripPickerPk = null },
+            onDismiss = { tripPickerPk = null }
         )
     }
 }
 
 @Composable
-internal fun AddToRouteDialog(
+internal fun TripPickerDialog(
     pk: Long,
-    routeStops: List<RouteStop>,
-    onNewStop: () -> Unit,
-    onAddAlternative: (String) -> Unit,
+    trips: List<Trip>,
+    onAddToTrip: (tripId: String) -> Unit,
+    onAddAlternative: (stopId: String) -> Unit,
+    onAddTrip: (name: String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var selectedTripId by remember(trips) {
+        mutableStateOf(trips.firstOrNull()?.id)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add to route") },
         text = {
-            Column {
-                TextButton(onClick = onNewStop, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("New stop", modifier = Modifier.weight(1f))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Trip selector chips
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(trips) { trip ->
+                        FilterChip(
+                            selected = trip.id == selectedTripId,
+                            onClick = { selectedTripId = trip.id },
+                            label = { Text(trip.name, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                    item {
+                        androidx.compose.material3.AssistChip(
+                            onClick = {
+                                val name = "Trip ${trips.size + 1}"
+                                onAddTrip(name)
+                            },
+                            label = { Text("+ New trip", style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
                 }
+
                 HorizontalDivider()
-                routeStops.forEachIndexed { idx, stop ->
+
+                // Options for selected trip
+                val selectedTrip = trips.find { it.id == selectedTripId }
+                if (selectedTrip != null) {
                     TextButton(
-                        onClick = { onAddAlternative(stop.id) },
+                        onClick = { onAddToTrip(selectedTrip.id) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            "Alternative for #${idx + 1} · ${stop.displayName(idx)}",
-                            modifier = Modifier.weight(1f)
-                        )
+                        Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("New stop in ${selectedTrip.name}", modifier = Modifier.weight(1f))
+                    }
+                    selectedTrip.stops.forEachIndexed { idx, stop ->
+                        HorizontalDivider()
+                        TextButton(
+                            onClick = { onAddAlternative(stop.id) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Alt. for #${idx + 1} · ${stop.displayName(idx)}",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                } else {
+                    TextButton(
+                        onClick = { onAddTrip("Trip 1") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Route, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Create new trip", modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -432,7 +479,8 @@ private fun ChargerCard(
     isExcluded: Boolean = false,
     onToggleFavourite: () -> Unit = {},
     onToggleExcluded: () -> Unit = {},
-    onAddToRoute: ((Long) -> Unit)? = null
+    onAddToRoute: ((Long) -> Unit)? = null,
+    onEditCustomCharger: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -624,6 +672,16 @@ private fun ChargerCard(
                     Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Maps", style = MaterialTheme.typography.labelSmall)
+                }
+                onEditCustomCharger?.let { editFn ->
+                    TextButton(
+                        onClick = editFn,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Edit", style = MaterialTheme.typography.labelSmall)
+                    }
                 }
                 charger.externalId?.let { extId ->
                     TextButton(
