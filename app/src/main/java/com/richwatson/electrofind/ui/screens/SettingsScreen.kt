@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +24,8 @@ fun SettingsScreen(
     chargerViewModel: ChargerViewModel,
     appPreferences: AppPreferences,
     onBack: () -> Unit,
-    onShowCurve: () -> Unit = {}
+    onShowCurve: () -> Unit = {},
+    onShowBackup: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
     var localStartSoc by remember(state.startSocPercent) { mutableIntStateOf(state.startSocPercent) }
@@ -194,6 +196,37 @@ fun SettingsScreen(
                     Text("Charge curve", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "Upload custom charge curves for additional car profiles",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onShowBackup)
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.SaveAlt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Backup & restore", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Export and import your chargers, favourites and routes",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

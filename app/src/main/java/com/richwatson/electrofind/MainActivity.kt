@@ -31,6 +31,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.richwatson.electrofind.ui.screens.AboutScreen
+import com.richwatson.electrofind.ui.screens.BackupRestoreScreen
 import com.richwatson.electrofind.ui.screens.AddEditCustomChargerScreen
 import com.richwatson.electrofind.ui.screens.ChargeCurveScreen
 import com.richwatson.electrofind.ui.screens.BrowseMapScreen
@@ -238,7 +239,16 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() },
                                 onShowCurve = {
                                     navController.navigate("curve") { launchSingleTop = true }
+                                },
+                                onShowBackup = {
+                                    navController.navigate("backup_restore") { launchSingleTop = true }
                                 }
+                            )
+                        }
+                        composable("backup_restore") {
+                            BackupRestoreScreen(
+                                chargerViewModel = chargerViewModel,
+                                onBack = { navController.popBackStack() }
                             )
                         }
                         composable("curve") {

@@ -4,8 +4,11 @@ import android.app.Application
 import android.location.Geocoder
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.richwatson.electrofind.model.BackupFile
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.CustomCharger
+import com.richwatson.electrofind.model.DataSet
+import com.richwatson.electrofind.model.MergeMode
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.model.toChargingLocation
@@ -670,6 +673,80 @@ class ChargerViewModel(
         appPreferences.rawSearchHistory = current.joinToString("\n") { "${it.label}\t${it.lat}\t${it.lng}" }
         _state.update { it.copy(searchHistory = current) }
     }
+
+    fun buildExportJson(sets: Set<DataSet>): String {
+        val s = _state.value
+        val backup = BackupFile(
+            customChargers = if (DataSet.CUSTOM_CHARGERS in sets) s.rawCustomChargers else null,
+            favouritePks = if (DataSet.FAVOURITES in sets) s.favouritePks.toList() else null,
+            excludedPks = if (DataSet.EXCLUDED in sets) s.excludedPks.toList() else null,
+            trips = if (DataSet.TRIPS in sets) s.trips else null
+        )
+        return gson.toJson(backup)
+    }
+
+    fun applyImport(json: String, options: Map<DataSet, MergeMode>) {
+        val type = object : TypeToken<BackupFile>() {}.type
+        val backup: BackupFile = gson.fromJson(json, type) ?: return
+        var s = _state.value
+
+        options[DataSet.CUSTOM_CHARGERS]?.let { mode ->
+            backup.customChargers?.let { imported ->
+                val merged = mergeById(s.rawCustomChargers, imported, mode) { a, b -> a.id == b.id }
+                saveRawCustomChargers(merged)
+                s = s.copy(rawCustomChargers = merged, customChargers = merged.map { it.toChargingLocation() })
+            }
+        }
+        options[DataSet.FAVOURITES]?.let { mode ->
+            backup.favouritePks?.let { imported ->
+                val merged = mergePkSet(s.favouritePks, imported.toSet(), mode)
+                appPreferences.favouritePks = merged
+                s = s.copy(favouritePks = merged)
+            }
+        }
+        options[DataSet.EXCLUDED]?.let { mode ->
+            backup.excludedPks?.let { imported ->
+                val merged = mergePkSet(s.excludedPks, imported.toSet(), mode)
+                appPreferences.excludedPks = merged
+                s = s.copy(excludedPks = merged)
+            }
+        }
+        options[DataSet.TRIPS]?.let { mode ->
+            backup.trips?.let { imported ->
+                val merged = mergeById(s.trips, imported, mode) { a, b -> a.id == b.id }
+                val newActiveId = s.activeTripId ?: merged.firstOrNull()?.id
+                saveTrips(merged, newActiveId)
+                s = s.copy(trips = merged, activeTripId = newActiveId)
+            }
+        }
+
+        _state.update { s }
+        loadRouteChargers(s.trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet())
+    }
+
+    private fun <T> mergeById(existing: List<T>, imported: List<T>, mode: MergeMode, sameId: (T, T) -> Boolean): List<T> =
+        when (mode) {
+            MergeMode.CLEAR_AND_REPLACE -> imported
+            MergeMode.ADD_NO_OVERWRITE -> {
+                val result = existing.toMutableList()
+                imported.forEach { imp -> if (result.none { sameId(it, imp) }) result.add(imp) }
+                result
+            }
+            MergeMode.ADD_AND_OVERWRITE -> {
+                val result = existing.toMutableList()
+                imported.forEach { imp ->
+                    val idx = result.indexOfFirst { sameId(it, imp) }
+                    if (idx >= 0) result[idx] = imp else result.add(imp)
+                }
+                result
+            }
+        }
+
+    private fun mergePkSet(existing: Set<Long>, imported: Set<Long>, mode: MergeMode): Set<Long> =
+        when (mode) {
+            MergeMode.CLEAR_AND_REPLACE -> imported
+            MergeMode.ADD_NO_OVERWRITE, MergeMode.ADD_AND_OVERWRITE -> existing + imported
+        }
 
     fun detectCurrency(lat: Double, lng: Double) {
         viewModelScope.launch(Dispatchers.IO) {
