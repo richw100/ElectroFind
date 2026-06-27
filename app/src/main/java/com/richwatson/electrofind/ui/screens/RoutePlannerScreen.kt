@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Route
@@ -66,12 +68,16 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,6 +115,33 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
                     onAddTrip = { chargerViewModel.addTrip("Trip ${trips.size + 1}") },
                     onTapActive = { renameTripId = activeTrip?.id }
                 )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+                    Text(
+                        text = state.routeChargersRefreshedAt
+                            ?.let { "Updated ${timeFmt.format(Date(it))}" }
+                            ?: "Not yet refreshed",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { chargerViewModel.refreshRouteChargers() },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Refresh availability",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 HorizontalDivider()
             }
 
@@ -159,6 +192,7 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
                             onRemove = { chargerViewModel.removeFromRoute(stop.id) },
                             onSetActive = { chargerViewModel.setActiveCharger(stop.id, it) },
                             onRemoveAlternative = { chargerViewModel.removeAlternative(stop.id, it) },
+                            onMoveAlternative = { idx, delta -> chargerViewModel.moveAlternative(stop.id, idx, delta) },
                             onNameChanged = { chargerViewModel.updateRouteStopName(stop.id, it) },
                             onEditSession = { editStop = stop },
                             onShowInfo = {
@@ -385,6 +419,7 @@ private fun RouteStopCard(
     onRemove: () -> Unit,
     onSetActive: (Int) -> Unit,
     onRemoveAlternative: (Long) -> Unit,
+    onMoveAlternative: (index: Int, delta: Int) -> Unit,
     onNameChanged: (String) -> Unit,
     onEditSession: () -> Unit,
     onShowInfo: () -> Unit,
@@ -453,29 +488,46 @@ private fun RouteStopCard(
                 }
             }
 
-            // Alternatives chips (shown only when more than one charger)
+            // Alternatives list (shown only when more than one charger)
             if (stop.chargerPks.size > 1) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.fillMaxWidth()) {
                     stop.chargerPks.forEachIndexed { idx, pk ->
-                        val label = allChargers[pk]?.name?.take(16) ?: "Stop $idx"
-                        FilterChip(
-                            selected = idx == stop.activeIndex,
-                            onClick = { onSetActive(idx) },
-                            label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-                            trailingIcon = if (stop.chargerPks.size > 1) {
-                                {
-                                    IconButton(
-                                        onClick = { onRemoveAlternative(pk) },
-                                        modifier = Modifier.size(14.dp)
-                                    ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Remove alternative", modifier = Modifier.size(10.dp))
-                                    }
+                        val isActive = idx == stop.activeIndex
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.width(20.dp)) {
+                                IconButton(
+                                    onClick = { onMoveAlternative(idx, -1) },
+                                    enabled = idx > 0,
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up", modifier = Modifier.size(14.dp))
                                 }
-                            } else null
-                        )
+                                IconButton(
+                                    onClick = { onMoveAlternative(idx, +1) },
+                                    enabled = idx < stop.chargerPks.size - 1,
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down", modifier = Modifier.size(14.dp))
+                                }
+                            }
+                            Text(
+                                text = "${if (isActive) "★ " else ""}${allChargers[pk]?.name?.take(30) ?: "pk:$pk"}",
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .then(if (!isActive) Modifier.clickable { onSetActive(idx) } else Modifier)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                            IconButton(
+                                onClick = { onRemoveAlternative(pk) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Remove alternative", modifier = Modifier.size(12.dp))
+                            }
+                        }
                     }
                 }
             }
@@ -495,18 +547,8 @@ private fun RouteStopCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // Availability
-                val evseNodes = charger.evses.edges.map { it.node }
-                val nAvail = evseNodes.count { it.status == "AVAILABLE" }
-                val nFault = evseNodes.count { it.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER") }
-                val nInUse = evseNodes.size - nAvail - nFault
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (nAvail > 0) Text("● $nAvail available", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
-                    if (nInUse > 0) Text("● $nInUse in use", style = MaterialTheme.typography.labelSmall, color = Color(0xFFF57F17))
-                    if (nFault > 0) Text("● $nFault fault${if (nFault > 1) "s" else ""}", style = MaterialTheme.typography.labelSmall, color = Color(0xFFB71C1C))
-                }
-
-                // Connector prices
+                // Connector prices with per-speed availability
+                val rpAvailByKw = charger.availabilityByKw
                 charger.connectorPriceSummaries.forEach { summary ->
                     val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
                     val kwLabel = summary.kilowatts?.let { kw ->
@@ -517,10 +559,24 @@ private fun RouteStopCard(
                         summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
                         else -> "—"
                     }
+                    val kwKey = summary.kilowatts?.toInt() ?: 0
+                    val (avail, inUse, fault) = rpAvailByKw[kwKey] ?: Triple(0, 0, 0)
+                    val availStr = buildString {
+                        if (avail > 0) append("$avail av")
+                        if (inUse > 0) { if (isNotEmpty()) append(" "); append("$inUse use") }
+                        if (fault > 0) { if (isNotEmpty()) append(" "); append("$fault fault${if (fault > 1) "s" else ""}") }
+                    }
                     Row(Modifier.fillMaxWidth()) {
                         Text(typeLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                        Text(kwLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(64.dp), textAlign = TextAlign.End)
+                        Text(kwLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(54.dp), textAlign = TextAlign.End)
                         Text(priceLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(84.dp), textAlign = TextAlign.End)
+                        if (availStr.isNotEmpty()) Text(
+                            availStr,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                            modifier = Modifier.width(72.dp),
+                            textAlign = TextAlign.End
+                        )
                     }
                 }
 
@@ -717,6 +773,7 @@ private fun ChargerInfoDialog(
                     if (charger.pk in excludedPks) Text("Excluded", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
                 }
 
+                val altAvailByKw = charger.availabilityByKw
                 charger.connectorPriceSummaries.forEach { summary ->
                     val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
                     val kwLabel = summary.kilowatts?.let { kw -> if (kw % 1.0 == 0.0) "${kw.toInt()} kW" else "%.1f kW".format(kw) } ?: ""
@@ -725,10 +782,24 @@ private fun ChargerInfoDialog(
                         summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
                         else -> "—"
                     }
+                    val kwKey = summary.kilowatts?.toInt() ?: 0
+                    val (avail, inUse, fault) = altAvailByKw[kwKey] ?: Triple(0, 0, 0)
+                    val availStr = buildString {
+                        if (avail > 0) append("$avail av")
+                        if (inUse > 0) { if (isNotEmpty()) append(" "); append("$inUse use") }
+                        if (fault > 0) { if (isNotEmpty()) append(" "); append("$fault fault${if (fault > 1) "s" else ""}") }
+                    }
                     Row(Modifier.fillMaxWidth()) {
                         Text(typeLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                        Text(kwLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(64.dp), textAlign = TextAlign.End)
+                        Text(kwLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(54.dp), textAlign = TextAlign.End)
                         Text(priceLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(88.dp), textAlign = TextAlign.End)
+                        if (availStr.isNotEmpty()) Text(
+                            availStr,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                            modifier = Modifier.width(72.dp),
+                            textAlign = TextAlign.End
+                        )
                     }
                 }
                 charger.connectionFeeMajor?.let { Text("+ %s%.2f connection fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -764,14 +835,14 @@ private fun ChargerInfoDialog(
                     }
                 }
 
-                val evseNodes = charger.evses.edges.map { it.node }
-                val nAvail = evseNodes.count { it.status == "AVAILABLE" }
-                val nFault = evseNodes.count { it.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER") }
-                val nInUse = evseNodes.size - nAvail - nFault
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (nAvail > 0) Text("$nAvail available", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
-                    if (nInUse > 0) Text("$nInUse in use", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF57F17))
-                    if (nFault > 0) Text("$nFault fault${if (nFault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                charger.availabilityByKw.entries.sortedByDescending { it.key }.forEach { (kw, counts) ->
+                    val (avail, inUse, fault) = counts
+                    if (avail + inUse + fault > 0) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("${kw}kW:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (avail > 0) Text("$avail avail", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
+                        if (inUse > 0) Text("$inUse in use", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF57F17))
+                        if (fault > 0) Text("$fault fault${if (fault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                    }
                 }
                 if (charger.isStale) Text("! Cached data may be out of date", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }

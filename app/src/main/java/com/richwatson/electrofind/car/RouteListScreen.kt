@@ -18,8 +18,11 @@ import com.richwatson.electrofind.R
 import com.richwatson.electrofind.ElectroFindApp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.ChargerRepository
+import android.content.pm.PackageManager
+import android.util.Log
 import kotlinx.coroutines.launch
 
 class RouteListScreen(carContext: CarContext) : Screen(carContext) {
@@ -29,7 +32,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
     private val repo: ChargerRepository = app.repository
     private val gson = Gson()
 
-    private var routeStops: List<RouteStop> = emptyList()
+    private var trips: List<Trip> = emptyList()
     private var chargerMap: Map<Long, ChargingLocation> = emptyMap()
     private var isLoading = true
 
@@ -38,25 +41,44 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
     }
 
     private fun loadData() {
-        val raw = prefs.rawRoutePlan
-        routeStops = if (raw.isEmpty()) emptyList() else try {
-            val type = object : TypeToken<List<RouteStop>>() {}.type
-            gson.fromJson<List<RouteStop>>(raw, type) ?: emptyList()
-        } catch (e: Exception) { emptyList() }
+        trips = loadTrips()
 
-        if (routeStops.isEmpty()) {
+        if (trips.isEmpty()) {
             isLoading = false
             invalidate()
             return
         }
 
         lifecycleScope.launch {
-            val allPks = routeStops.flatMap { it.chargerPks }.toSet()
+            val allPks = trips.flatMap { it.stops }.flatMap { it.chargerPks }.toSet()
             val chargers = repo.getChargersByPks(allPks)
             chargerMap = chargers.associateBy { it.pk }
             isLoading = false
             invalidate()
         }
+    }
+
+    private fun loadTrips(): List<Trip> {
+        val raw = prefs.rawTrips
+        if (raw.isNotEmpty() && raw != "[]") {
+            return try {
+                val type = object : TypeToken<List<Trip>>() {}.type
+                gson.fromJson<List<Trip>>(raw, type) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e("RouteListScreen", "Failed to parse rawTrips", e)
+                emptyList()
+            }
+        }
+        // Legacy fallback
+        val legacyRaw = prefs.rawRoutePlan
+        if (legacyRaw.isNotEmpty()) {
+            return try {
+                val type = object : TypeToken<List<RouteStop>>() {}.type
+                val stops = gson.fromJson<List<RouteStop>>(legacyRaw, type) ?: emptyList()
+                if (stops.isEmpty()) emptyList() else listOf(Trip(name = "Trip 1", stops = stops))
+            } catch (e: Exception) { emptyList() }
+        }
+        return emptyList()
     }
 
     override fun onGetTemplate(): Template {
@@ -68,7 +90,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
                 .build()
         }
 
-        if (routeStops.isEmpty()) {
+        if (trips.isEmpty()) {
             return MessageTemplate.Builder("No route planned.\nAdd stops in the ElectroFind app.")
                 .setTitle("Route stops")
                 .setHeaderAction(Action.APP_ICON)
@@ -81,8 +103,62 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
                 .build()
         }
 
+        val versionName = try {
+            carContext.packageManager.getPackageInfo(carContext.packageName, 0).versionName
+        } catch (_: PackageManager.NameNotFoundException) { "" }
+
+        val refreshIcon = CarIcon.Builder(
+            IconCompat.createWithResource(carContext, R.drawable.ic_car_refresh)
+        ).build()
+
+        if (trips.size == 1) {
+            return stopsTemplate(trips[0], "Route stops · v$versionName", Action.APP_ICON, refreshIcon)
+        }
+
+        // Multiple trips — show trip list
         val listBuilder = ItemList.Builder()
-        routeStops.forEachIndexed { idx, stop ->
+        trips.forEach { trip ->
+            val stopCount = trip.stops.size
+            val firstName = trip.stops.firstOrNull()?.let { chargerMap[it.activePk]?.name } ?: ""
+            val subtitle = buildString {
+                append("$stopCount stop${if (stopCount != 1) "s" else ""}")
+                if (firstName.isNotEmpty()) append(" · $firstName…")
+            }
+            listBuilder.addItem(
+                Row.Builder()
+                    .setTitle(trip.name)
+                    .addText(subtitle)
+                    .setOnClickListener { screenManager.push(tripStopsScreen(trip)) }
+                    .build()
+            )
+        }
+
+        return ListTemplate.Builder()
+            .setTitle("Route stops · v$versionName")
+            .setHeaderAction(Action.APP_ICON)
+            .setSingleList(listBuilder.build())
+            .addAction(
+                Action.Builder()
+                    .setIcon(refreshIcon)
+                    .setBackgroundColor(CarColor.PRIMARY)
+                    .setOnClickListener { loadData() }
+                    .build()
+            )
+            .build()
+    }
+
+    private fun tripStopsScreen(trip: Trip): Screen = object : Screen(carContext) {
+        override fun onGetTemplate(): Template {
+            val refreshIcon = CarIcon.Builder(
+                IconCompat.createWithResource(carContext, R.drawable.ic_car_refresh)
+            ).build()
+            return stopsTemplate(trip, trip.name, Action.BACK, refreshIcon)
+        }
+    }
+
+    private fun stopsTemplate(trip: Trip, title: String, headerAction: Action, refreshIcon: CarIcon): ListTemplate {
+        val listBuilder = ItemList.Builder()
+        trip.stops.forEachIndexed { idx, stop ->
             val charger = chargerMap[stop.activePk]
             val chargerName = charger?.name ?: "Loading…"
             val availability = charger?.availabilitySummary() ?: ""
@@ -99,13 +175,9 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             )
         }
 
-        val refreshIcon = CarIcon.Builder(
-            IconCompat.createWithResource(carContext, R.drawable.ic_car_refresh)
-        ).build()
-
         return ListTemplate.Builder()
-            .setTitle("Route stops")
-            .setHeaderAction(Action.APP_ICON)
+            .setTitle(title)
+            .setHeaderAction(headerAction)
             .setSingleList(listBuilder.build())
             .addAction(
                 Action.Builder()
@@ -119,13 +191,17 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
 }
 
 internal fun ChargingLocation.availabilitySummary(): String {
-    val evseNodes = evses.edges.map { it.node }
-    val nAvail = evseNodes.count { it.status == "AVAILABLE" }
-    val nFault = evseNodes.count { it.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER") }
-    val nInUse = evseNodes.size - nAvail - nFault
-    return listOfNotNull(
-        if (nAvail > 0) "$nAvail avail" else null,
-        if (nInUse > 0) "$nInUse in use" else null,
-        if (nFault > 0) "$nFault fault${if (nFault > 1) "s" else ""}" else null
-    ).joinToString(" · ")
+    val byKw = availabilityByKw
+    if (byKw.isEmpty()) return ""
+    return byKw.entries
+        .sortedByDescending { it.key }
+        .joinToString(" · ") { (kw, counts) ->
+            val (avail, inUse, fault) = counts
+            val parts = listOfNotNull(
+                if (avail > 0) "$avail av" else null,
+                if (inUse > 0) "$inUse use" else null,
+                if (fault > 0) "$fault fault${if (fault > 1) "s" else ""}" else null
+            )
+            "${kw}kW: ${parts.joinToString(", ")}"
+        }
 }

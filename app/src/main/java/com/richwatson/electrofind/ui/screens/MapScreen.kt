@@ -805,6 +805,7 @@ fun ChargerMapView(
                         if (charger.pk in favouritePks) Text("Favourite", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE53935))
                         if (charger.pk in excludedPks) Text("Excluded", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
                     }
+                    val mapAvailByKw = charger.availabilityByKw
                     charger.connectorPriceSummaries.forEach { summary ->
                         val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
                         val kwLabel = summary.kilowatts?.let { kw ->
@@ -815,10 +816,24 @@ fun ChargerMapView(
                             summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
                             else -> "—"
                         }
+                        val kwKey = summary.kilowatts?.toInt() ?: 0
+                        val (avail, inUse, fault) = mapAvailByKw[kwKey] ?: Triple(0, 0, 0)
+                        val availStr = buildString {
+                            if (avail > 0) append("$avail av")
+                            if (inUse > 0) { if (isNotEmpty()) append(" "); append("$inUse use") }
+                            if (fault > 0) { if (isNotEmpty()) append(" "); append("$fault fault${if (fault > 1) "s" else ""}") }
+                        }
                         Row(Modifier.fillMaxWidth()) {
                             Text(typeLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                            Text(kwLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(64.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                            Text(kwLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(54.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
                             Text(priceLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(88.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                            if (availStr.isNotEmpty()) Text(
+                                availStr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                                modifier = Modifier.width(72.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.End
+                            )
                         }
                     }
                     charger.connectionFeeMajor?.let {
@@ -874,14 +889,19 @@ fun ChargerMapView(
                             }
                         }
                     }
-                    val evseNodes = charger.evses.edges.map { it.node }
-                    val nAvail = evseNodes.count { it.status == "AVAILABLE" }
-                    val nFault = evseNodes.count { it.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER") }
-                    val nInUse = evseNodes.size - nAvail - nFault
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (nAvail > 0) Text("$nAvail available", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
-                        if (nInUse > 0) Text("$nInUse in use", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF57F17))
-                        if (nFault > 0) Text("$nFault fault${if (nFault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                    charger.availabilityByKw.entries.sortedByDescending { it.key }.forEach { (kw, counts) ->
+                        val (avail, inUse, fault) = counts
+                        val parts = listOfNotNull(
+                            if (avail > 0) avail.toString() + " avail" else null,
+                            if (inUse > 0) inUse.toString() + " in use" else null,
+                            if (fault > 0) fault.toString() + " fault${if (fault > 1) "s" else ""}" else null
+                        )
+                        if (parts.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("${kw}kW:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (avail > 0) Text("$avail avail", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
+                            if (inUse > 0) Text("$inUse in use", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF57F17))
+                            if (fault > 0) Text("$fault fault${if (fault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                        }
                     }
                     if (charger.isStale) {
                         Text(

@@ -558,8 +558,9 @@ private fun ChargerCard(
             }
 
             Spacer(Modifier.height(4.dp))
+            val availByKw = charger.availabilityByKw
             charger.connectorPriceSummaries.forEach { summary ->
-                ConnectorPriceRow(summary, currencySymbol)
+                ConnectorPriceRow(summary, currencySymbol, availByKw)
             }
 
             charger.connectionFeeMajor?.let { fee ->
@@ -702,7 +703,11 @@ private fun ChargerCard(
 }
 
 @Composable
-private fun ConnectorPriceRow(summary: com.richwatson.electrofind.api.models.ConnectorPriceSummary, currencySymbol: String) {
+private fun ConnectorPriceRow(
+    summary: com.richwatson.electrofind.api.models.ConnectorPriceSummary,
+    currencySymbol: String,
+    availByKw: Map<Int, Triple<Int, Int, Int>> = emptyMap()
+) {
     val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
     val kwLabel = summary.kilowatts?.let { kw ->
         if (kw % 1.0 == 0.0) "${kw.toInt()} kW" else "%.1f kW".format(kw)
@@ -712,10 +717,26 @@ private fun ConnectorPriceRow(summary: com.richwatson.electrofind.api.models.Con
         summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
         else -> "—"
     }
+    val kwKey = summary.kilowatts?.toInt() ?: 0
+    val (avail, inUse, fault) = availByKw[kwKey] ?: Triple(0, 0, 0)
+    val availStr = buildString {
+        if (avail > 0) append("$avail av")
+        if (inUse > 0) { if (isNotEmpty()) append(" "); append("$inUse use") }
+        if (fault > 0) { if (isNotEmpty()) append(" "); append("$fault fault${if (fault > 1) "s" else ""}") }
+    }
     Row(Modifier.fillMaxWidth()) {
         Text(typeLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-        Text(kwLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(64.dp), textAlign = TextAlign.End)
+        Text(kwLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(54.dp), textAlign = TextAlign.End)
         Text(priceLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(84.dp), textAlign = TextAlign.End)
+        if (availStr.isNotEmpty()) {
+            Text(
+                availStr,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                modifier = Modifier.width(72.dp),
+                textAlign = TextAlign.End
+            )
+        }
     }
 }
 
@@ -766,6 +787,7 @@ internal val SpeedFilter.label: String get() = when (this) {
     SpeedFilter.ALL -> "Any"
     SpeedFilter.FAST -> "7+ kW"
     SpeedFilter.RAPID -> "22+ kW"
+    SpeedFilter.DC_FAST -> "50+ kW"
     SpeedFilter.ULTRA -> "100+ kW"
 }
 

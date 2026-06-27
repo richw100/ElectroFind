@@ -34,7 +34,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class SortOrder { PRICE_ASC, PRICE_DESC, SPEED_DESC, OPTIMAL_COST_ASC, STAY_COST_ASC }
-enum class SpeedFilter { ALL, FAST, RAPID, ULTRA }
+enum class SpeedFilter { ALL, FAST, RAPID, DC_FAST, ULTRA }
 enum class ThemeMode { LIGHT, DARK, SYSTEM }
 
 data class SearchHistoryEntry(val label: String, val lat: Double, val lng: Double)
@@ -79,6 +79,7 @@ data class SearchState(
     val trips: List<Trip> = emptyList(),
     val activeTripId: String? = null,
     val routeChargers: Map<Long, ChargingLocation> = emptyMap(),
+    val routeChargersRefreshedAt: Long? = null,
     val customChargers: List<ChargingLocation> = emptyList(),
     val rawCustomChargers: List<CustomCharger> = emptyList()
 ) {
@@ -150,6 +151,7 @@ class ChargerViewModel(
                 SpeedFilter.ALL -> list
                 SpeedFilter.FAST -> list.filter { it.maxKilowatts?.let { kw -> kw >= 7 } == true }
                 SpeedFilter.RAPID -> list.filter { it.maxKilowatts?.let { kw -> kw >= 22 } == true }
+                SpeedFilter.DC_FAST -> list.filter { it.maxKilowatts?.let { kw -> kw >= 50 } == true }
                 SpeedFilter.ULTRA -> list.filter { it.maxKilowatts?.let { kw -> kw >= 100 } == true }
             }
             s.maxSpeedKw?.let { max -> list = list.filter { (it.maxKilowatts ?: 0.0) <= max } }
@@ -459,7 +461,24 @@ class ChargerViewModel(
         if (pks.isEmpty()) return
         viewModelScope.launch {
             val chargers = repository.getChargersByPks(pks)
-            _state.update { s -> s.copy(routeChargers = s.routeChargers + chargers.associateBy { it.pk }) }
+            _state.update { s -> s.copy(
+                routeChargers = s.routeChargers + chargers.associateBy { it.pk },
+                routeChargersRefreshedAt = System.currentTimeMillis()
+            ) }
+        }
+    }
+
+    fun refreshRouteChargers() {
+        val pks = _state.value.trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet()
+        if (pks.isEmpty()) return
+        viewModelScope.launch {
+            val fresh = pks.mapNotNull { pk -> repository.fetchChargingLocation(pk.toString()) }
+            if (fresh.isNotEmpty()) {
+                _state.update { s -> s.copy(
+                    routeChargers = s.routeChargers + fresh.associateBy { it.pk },
+                    routeChargersRefreshedAt = System.currentTimeMillis()
+                ) }
+            }
         }
     }
 
@@ -570,6 +589,24 @@ class ChargerViewModel(
         val updated = updateStopInTrips(stopId) { stop ->
             val newPks = stop.chargerPks.filter { it != pk }
             if (newPks.isEmpty()) stop else stop.copy(chargerPks = newPks, activeIndex = stop.activeIndex.coerceIn(0, newPks.size - 1))
+        }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
+    }
+
+    fun moveAlternative(stopId: String, fromIndex: Int, delta: Int) {
+        val updated = updateStopInTrips(stopId) { stop ->
+            val pks = stop.chargerPks.toMutableList()
+            val toIndex = (fromIndex + delta).coerceIn(0, pks.size - 1)
+            if (fromIndex == toIndex) return@updateStopInTrips stop
+            val pk = pks.removeAt(fromIndex)
+            pks.add(toIndex, pk)
+            val newActive = when (stop.activeIndex) {
+                fromIndex -> toIndex
+                toIndex -> fromIndex
+                else -> stop.activeIndex
+            }
+            stop.copy(chargerPks = pks, activeIndex = newActive)
         }
         saveTrips(updated)
         _state.update { it.copy(trips = updated) }

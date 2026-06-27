@@ -125,6 +125,21 @@ data class ChargingLocation(
         it.node.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER")
     }
 
+    val availabilityByKw: Map<Int, Triple<Int, Int, Int>> get() {
+        val faultStatuses = setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER")
+        return evses.edges
+            .map { it.node }
+            .groupBy { evse ->
+                evse.connectors.edges.mapNotNull { it.node.kilowatts }.maxOrNull()?.toInt() ?: 0
+            }
+            .filterKeys { it > 0 }
+            .mapValues { (_, evseList) ->
+                val avail = evseList.count { it.status == "AVAILABLE" }
+                val fault = evseList.count { it.status in faultStatuses }
+                Triple(avail, evseList.size - avail - fault, fault)
+            }
+    }
+
     val connectorPriceSummaries: List<ConnectorPriceSummary> get() {
         return evses.edges
             .flatMap { it.node.connectors.edges.map { e -> e.node } }
