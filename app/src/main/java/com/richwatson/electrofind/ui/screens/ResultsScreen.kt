@@ -35,6 +35,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
@@ -508,6 +509,14 @@ private fun ChargerCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    timeAgo(charger.cachedAt)?.let {
+                        Text(
+                            "Updated $it",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (charger.isStale) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (charger.pricePerKwh == null && charger.pricingText != null) {
                         Text(
                             charger.pricingText,

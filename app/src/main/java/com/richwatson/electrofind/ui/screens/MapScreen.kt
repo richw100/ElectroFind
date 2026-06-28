@@ -81,6 +81,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
@@ -360,9 +361,15 @@ fun ResultsMapScreen(
     val state by chargerViewModel.state.collectAsState()
     val chargers = remember(state) {
         val results = chargerViewModel.filteredSortedChargers
+        val routeByPk = state.routeChargers
         val resultPks = results.map { it.pk }.toSet()
         val extraFavourites = state.favouriteChargers.filter { it.pk !in resultPks }
-        results + extraFavourites
+        val knownPks = resultPks + extraFavourites.map { it.pk }.toSet()
+        val routeOnly = routeByPk.values.filter { it.pk !in knownPks }
+        // Prefer freshly-refreshed route charger data over stale search results
+        val mergedResults = results.map { routeByPk[it.pk]?.takeIf { r -> r.cachedAt > it.cachedAt } ?: it }
+        val mergedFavourites = extraFavourites.map { routeByPk[it.pk]?.takeIf { r -> r.cachedAt > it.cachedAt } ?: it }
+        mergedResults + mergedFavourites + routeOnly
     }
     var showFilters by remember { mutableStateOf(false) }
     var priceMode by remember { mutableStateOf(MapPriceMode.PER_KWH) }
@@ -903,11 +910,12 @@ fun ChargerMapView(
                             if (fault > 0) Text("$fault fault${if (fault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
                         }
                     }
-                    if (charger.isStale) {
+                    timeAgo(charger.cachedAt)?.let {
                         Text(
-                            "! Cached data may be out of date",
+                            "Updated $it",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error
+                            color = if (charger.isStale) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

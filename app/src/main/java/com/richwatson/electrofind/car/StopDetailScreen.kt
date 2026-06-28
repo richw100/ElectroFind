@@ -204,7 +204,12 @@ class StopDetailScreen(
         )
         val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble())
 
-        return "Optimal £${"%.2f".format(optCost)} · Stay £${"%.2f".format(stayCost)}"
+        return buildString {
+            append("Optimal £${"%.2f".format(optCost)} · Stay £${"%.2f".format(stayCost)}")
+            if (connectionFee > 0) append(" · £${"%.2f".format(connectionFee)} conn fee")
+            if (chargingRate > 0) append(" · £${"%.2f".format(chargingRate)}/min")
+            if (parkingRate > 0) append(" · £${"%.2f".format(parkingRate)}/min parking")
+        }
     }
 
     private fun paramPickerScreen(

@@ -230,7 +230,13 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("route") {
-                            RoutePlannerScreen(chargerViewModel = chargerViewModel)
+                            RoutePlannerScreen(
+                                chargerViewModel = chargerViewModel,
+                                onShowOnMap = { pk ->
+                                    chargerViewModel.selectCharger(pk)
+                                    navController.navigate("results_map") { launchSingleTop = true }
+                                }
+                            )
                         }
                         composable("settings") {
                             SettingsScreen(

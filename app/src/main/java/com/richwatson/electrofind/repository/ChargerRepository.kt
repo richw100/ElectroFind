@@ -372,6 +372,28 @@ class ChargerRepository(
         result
     }
 
+    suspend fun refreshChargersByPks(pks: Set<Long>): List<ChargingLocation> = withContext(Dispatchers.IO) {
+        if (pks.isEmpty()) return@withContext emptyList()
+        val now = System.currentTimeMillis()
+        coroutineScope {
+            pks.map { pk ->
+                async {
+                    try {
+                        val charger = fetchChargingLocation(pk.toString()) ?: return@async null
+                        dao.upsert(CachedChargerEntity(
+                            pk = charger.pk,
+                            lat = charger.coordinates.latitude,
+                            lng = charger.coordinates.longitude,
+                            cachedAt = now,
+                            json = gson.toJson(charger)
+                        ))
+                        charger.copy(cachedAt = now)
+                    } catch (e: Exception) { null }
+                }
+            }.awaitAll().filterNotNull()
+        }
+    }
+
     suspend fun fetchChargingLocation(pk: String): ChargingLocation? = withContext(Dispatchers.IO) {
         try {
             val request = GraphQLRequest(

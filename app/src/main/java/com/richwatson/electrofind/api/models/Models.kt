@@ -169,6 +169,17 @@ data class ChargingLocation(
     }
 }
 
+fun timeAgo(cachedAt: Long): String? {
+    if (cachedAt <= 0L) return null
+    val ago = System.currentTimeMillis() - cachedAt
+    return when {
+        ago < 60_000L          -> "just now"
+        ago < 3_600_000L       -> "${ago / 60_000} min ago"
+        ago < 86_400_000L      -> "${ago / 3_600_000}h ago"
+        else                   -> "${ago / 86_400_000}d ago"
+    }
+}
+
 data class Coordinates(val longitude: Double, val latitude: Double)
 
 data class Operator(

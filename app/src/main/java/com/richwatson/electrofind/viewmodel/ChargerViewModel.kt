@@ -472,11 +472,16 @@ class ChargerViewModel(
         val pks = _state.value.trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet()
         if (pks.isEmpty()) return
         viewModelScope.launch {
-            val fresh = pks.mapNotNull { pk -> repository.fetchChargingLocation(pk.toString()) }
+            val fresh = repository.refreshChargersByPks(pks)
             if (fresh.isNotEmpty()) {
+                val freshByPk = fresh.associateBy { it.pk }
                 _state.update { s -> s.copy(
-                    routeChargers = s.routeChargers + fresh.associateBy { it.pk },
-                    routeChargersRefreshedAt = System.currentTimeMillis()
+                    routeChargers = s.routeChargers + freshByPk,
+                    routeChargersRefreshedAt = System.currentTimeMillis(),
+                    // Propagate fresh data into search results and favourites so all
+                    // map views pick up the updated availability and timestamp immediately
+                    chargers = s.chargers.map { freshByPk[it.pk] ?: it },
+                    favouriteChargers = s.favouriteChargers.map { freshByPk[it.pk] ?: it }
                 ) }
             }
         }
@@ -594,19 +599,19 @@ class ChargerViewModel(
         _state.update { it.copy(trips = updated) }
     }
 
-    fun moveAlternative(stopId: String, fromIndex: Int, delta: Int) {
+    fun moveAlternative(stopId: String, fromIndex: Int, toIndex: Int) {
         val updated = updateStopInTrips(stopId) { stop ->
             val pks = stop.chargerPks.toMutableList()
-            val toIndex = (fromIndex + delta).coerceIn(0, pks.size - 1)
-            if (fromIndex == toIndex) return@updateStopInTrips stop
+            if (fromIndex == toIndex || fromIndex !in pks.indices || toIndex !in pks.indices) return@updateStopInTrips stop
             val pk = pks.removeAt(fromIndex)
             pks.add(toIndex, pk)
             val newActive = when (stop.activeIndex) {
                 fromIndex -> toIndex
-                toIndex -> fromIndex
+                in (minOf(fromIndex, toIndex)..maxOf(fromIndex, toIndex)) ->
+                    stop.activeIndex + if (fromIndex > toIndex) 1 else -1
                 else -> stop.activeIndex
             }
-            stop.copy(chargerPks = pks, activeIndex = newActive)
+            stop.copy(chargerPks = pks, activeIndex = newActive.coerceIn(0, pks.size - 1))
         }
         saveTrips(updated)
         _state.update { it.copy(trips = updated) }

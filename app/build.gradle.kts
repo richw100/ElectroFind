@@ -13,8 +13,8 @@ android {
         applicationId = "com.richwatson.electrofind"
         minSdk = 24
         targetSdk = 35
-        versionCode = 42
-        versionName = "1.32.0"
+        versionCode = 43
+        versionName = "1.33.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
@@ -101,6 +101,9 @@ dependencies {
 
     // Android Auto
     implementation("androidx.car.app:app:1.7.0")
+
+    // Drag-to-reorder
+    implementation("sh.calvin.reorderable:reorderable:2.4.0")
 
     // Local cache (Room)
     val roomVersion = "2.6.1"

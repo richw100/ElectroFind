@@ -18,12 +18,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material3.AlertDialog
@@ -44,6 +47,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,11 +70,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
@@ -79,18 +86,20 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private data class ConfirmPendingAction(val title: String, val body: String, val onConfirm: () -> Unit)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
+fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -> Unit = {}) {
     val state by chargerViewModel.state.collectAsState()
     val trips = state.trips
     val activeTrip = state.activeTrip
     val stops = state.routeStops
-    var infoCharger by remember { mutableStateOf<ChargingLocation?>(null) }
-    var infoSession by remember { mutableStateOf<ChargeSession?>(null) }
     var editStop by remember { mutableStateOf<RouteStop?>(null) }
     var renameTripId by remember { mutableStateOf<String?>(null) }
     var copyStopId by remember { mutableStateOf<String?>(null) }
+    var addAltFromStopId by remember { mutableStateOf<String?>(null) }
+    var pendingConfirm by remember { mutableStateOf<ConfirmPendingAction?>(null) }
 
     Scaffold(
         topBar = {
@@ -98,7 +107,12 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
                 title = { Text("Route planner") },
                 actions = {
                     if (stops.isNotEmpty()) {
-                        IconButton(onClick = { chargerViewModel.clearRoute() }) {
+                        IconButton(onClick = {
+                            pendingConfirm = ConfirmPendingAction(
+                                "Clear route?",
+                                "Remove all stops from all trips?"
+                            ) { chargerViewModel.clearRoute() }
+                        }) {
                             Icon(Icons.Default.DeleteSweep, contentDescription = "Clear route")
                         }
                     }
@@ -189,26 +203,31 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
                             allChargers = state.routeChargers,
                             onMoveUp = { chargerViewModel.moveRouteStop(stop.id, -1) },
                             onMoveDown = { chargerViewModel.moveRouteStop(stop.id, +1) },
-                            onRemove = { chargerViewModel.removeFromRoute(stop.id) },
+                            onRemove = {
+                                val name = charger?.name ?: stop.displayName(idx)
+                                pendingConfirm = ConfirmPendingAction(
+                                    "Remove stop?",
+                                    "Remove \"$name\" from the route?"
+                                ) { chargerViewModel.removeFromRoute(stop.id) }
+                            },
                             onSetActive = { chargerViewModel.setActiveCharger(stop.id, it) },
-                            onRemoveAlternative = { chargerViewModel.removeAlternative(stop.id, it) },
-                            onMoveAlternative = { idx, delta -> chargerViewModel.moveAlternative(stop.id, idx, delta) },
+                            onRemoveAlternative = { pk ->
+                                val name = state.routeChargers[pk]?.name ?: "this charger"
+                                pendingConfirm = ConfirmPendingAction(
+                                    "Remove alternative?",
+                                    "Remove \"$name\" from this stop?"
+                                ) { chargerViewModel.removeAlternative(stop.id, pk) }
+                            },
+                            onMoveAlternative = { from, to -> chargerViewModel.moveAlternative(stop.id, from, to) },
                             onNameChanged = { chargerViewModel.updateRouteStopName(stop.id, it) },
                             onEditSession = { editStop = stop },
-                            onShowInfo = {
-                                infoCharger = charger
-                                infoSession = ChargeSession(
-                                    stop.arrivalSocPercent,
-                                    stop.departureSocPercent,
-                                    stop.stayMinutes,
-                                    state.activeProfile
-                                )
-                            },
+                            onShowOnMap = { charger?.let { onShowOnMap(it.pk) } },
                             onToggleFavourite = { chargerViewModel.toggleFavourite(stop.activePk) },
                             onToggleExcluded = { chargerViewModel.toggleExcluded(stop.activePk) },
                             isFavourite = stop.activePk in state.favouritePks,
                             isExcluded = stop.activePk in state.excludedPks,
-                            onCopyStop = if (trips.size > 1) { { copyStopId = stop.id } } else null
+                            onCopyStop = if (trips.size > 1) { { copyStopId = stop.id } } else null,
+                            onAddAsAlternative = if (stops.size > 1) { { addAltFromStopId = stop.id } } else null
                         )
                     }
                 }
@@ -227,18 +246,6 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
         )
     }
 
-    infoCharger?.let { charger ->
-        ChargerInfoDialog(
-            charger = charger,
-            session = infoSession,
-            currencySymbol = state.currencySymbol,
-            favouritePks = state.favouritePks,
-            excludedPks = state.excludedPks,
-            onToggleFavourite = { chargerViewModel.toggleFavourite(charger.pk) },
-            onToggleExcluded = { chargerViewModel.toggleExcluded(charger.pk) },
-            onDismiss = { infoCharger = null }
-        )
-    }
 
     copyStopId?.let { stopId ->
         CopyStopDialog(
@@ -252,6 +259,24 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
         )
     }
 
+    addAltFromStopId?.let { stopId ->
+        val sourcePk = stops.find { it.id == stopId }?.activePk
+        val sourceName = sourcePk?.let { state.routeChargers[it]?.name } ?: "charger"
+        if (sourcePk != null) {
+            AddAsAlternativeDialog(
+                sourceChargerName = sourceName,
+                stops = stops,
+                sourceStopId = stopId,
+                allChargers = state.routeChargers,
+                onAdd = { targetStopId ->
+                    chargerViewModel.addAlternativeToStop(targetStopId, sourcePk)
+                    addAltFromStopId = null
+                },
+                onDismiss = { addAltFromStopId = null }
+            )
+        }
+    }
+
     renameTripId?.let { tripId ->
         val trip = trips.find { it.id == tripId }
         val tripIndex = trips.indexOfFirst { it.id == tripId }
@@ -261,12 +286,26 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel) {
                 tripIndex = tripIndex,
                 tripCount = trips.size,
                 onRename = { newName -> chargerViewModel.renameTrip(tripId, newName); renameTripId = null },
-                onDelete = { chargerViewModel.deleteTrip(tripId); renameTripId = null },
+                onDelete = {
+                    pendingConfirm = ConfirmPendingAction(
+                        "Delete trip?",
+                        "Delete \"${trip.name}\"? All stops will be removed."
+                    ) { chargerViewModel.deleteTrip(tripId); renameTripId = null }
+                },
                 onMoveLeft = { chargerViewModel.reorderTrip(tripId, -1) },
                 onMoveRight = { chargerViewModel.reorderTrip(tripId, +1) },
                 onDismiss = { renameTripId = null }
             )
         }
+    }
+
+    pendingConfirm?.let { action ->
+        ConfirmDeleteDialog(
+            title = action.title,
+            body = action.body,
+            onConfirm = { action.onConfirm(); pendingConfirm = null },
+            onDismiss = { pendingConfirm = null }
+        )
     }
 }
 
@@ -407,6 +446,62 @@ private fun CopyStopDialog(
 }
 
 @Composable
+private fun AddAsAlternativeDialog(
+    sourceChargerName: String,
+    stops: List<RouteStop>,
+    sourceStopId: String,
+    allChargers: Map<Long, ChargingLocation>,
+    onAdd: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val otherStops = stops.filter { it.id != sourceStopId }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add as alternative to…") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(sourceChargerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                otherStops.forEach { stop ->
+                    val idx = stops.indexOf(stop)
+                    val chargerName = allChargers[stop.activePk]?.name ?: ""
+                    TextButton(onClick = { onAdd(stop.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stop.displayName(idx))
+                            if (chargerName.isNotEmpty()) {
+                                Text(chargerName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun ConfirmDeleteDialog(
+    title: String,
+    body: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
 private fun RouteStopCard(
     stop: RouteStop,
     position: Int,
@@ -419,15 +514,16 @@ private fun RouteStopCard(
     onRemove: () -> Unit,
     onSetActive: (Int) -> Unit,
     onRemoveAlternative: (Long) -> Unit,
-    onMoveAlternative: (index: Int, delta: Int) -> Unit,
+    onMoveAlternative: (fromIndex: Int, toIndex: Int) -> Unit,
     onNameChanged: (String) -> Unit,
     onEditSession: () -> Unit,
-    onShowInfo: () -> Unit,
+    onShowOnMap: () -> Unit,
     onToggleFavourite: () -> Unit,
     onToggleExcluded: () -> Unit,
     isFavourite: Boolean,
     isExcluded: Boolean,
-    onCopyStop: (() -> Unit)? = null
+    onCopyStop: (() -> Unit)? = null,
+    onAddAsAlternative: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var nameText by remember(stop.id) { mutableStateOf(stop.customName ?: "") }
@@ -478,6 +574,11 @@ private fun RouteStopCard(
                 IconButton(onClick = onMoveDown, enabled = position < totalStops - 1, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down", modifier = Modifier.size(18.dp))
                 }
+                if (onAddAsAlternative != null) {
+                    IconButton(onClick = onAddAsAlternative, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Add, contentDescription = "Add as alternative to stop", modifier = Modifier.size(18.dp))
+                    }
+                }
                 if (onCopyStop != null) {
                     IconButton(onClick = onCopyStop, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.ContentCopy, contentDescription = "Copy to trip", modifier = Modifier.size(18.dp))
@@ -488,45 +589,48 @@ private fun RouteStopCard(
                 }
             }
 
-            // Alternatives list (shown only when more than one charger)
+            // Alternatives chips — long-press to drag and reorder
             if (stop.chargerPks.size > 1) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.fillMaxWidth()) {
-                    stop.chargerPks.forEachIndexed { idx, pk ->
-                        val isActive = idx == stop.activeIndex
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.width(20.dp)) {
-                                IconButton(
-                                    onClick = { onMoveAlternative(idx, -1) },
-                                    enabled = idx > 0,
-                                    modifier = Modifier.size(20.dp)
-                                ) {
-                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up", modifier = Modifier.size(14.dp))
-                                }
-                                IconButton(
-                                    onClick = { onMoveAlternative(idx, +1) },
-                                    enabled = idx < stop.chargerPks.size - 1,
-                                    modifier = Modifier.size(20.dp)
-                                ) {
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down", modifier = Modifier.size(14.dp))
-                                }
-                            }
-                            Text(
-                                text = "${if (isActive) "★ " else ""}${allChargers[pk]?.name?.take(30) ?: "pk:$pk"}",
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .then(if (!isActive) Modifier.clickable { onSetActive(idx) } else Modifier)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                val listState = rememberLazyListState()
+                val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+                    onMoveAlternative(from.index, to.index)
+                }
+                LazyRow(
+                    state = listState,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    itemsIndexed(stop.chargerPks, key = { _, pk -> pk }) { idx, pk ->
+                        ReorderableItem(reorderState, key = pk) { isDragging ->
+                            val elevation by animateDpAsState(
+                                targetValue = if (isDragging) 6.dp else 0.dp,
+                                label = "chip-drag-elevation"
                             )
-                            IconButton(
-                                onClick = { onRemoveAlternative(pk) },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = "Remove alternative", modifier = Modifier.size(12.dp))
-                            }
+                            FilterChip(
+                                selected = idx == stop.activeIndex,
+                                onClick = { onSetActive(idx) },
+                                label = {
+                                    Text(
+                                        allChargers[pk]?.name?.take(16) ?: "Stop $idx",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1
+                                    )
+                                },
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = { onRemoveAlternative(pk) },
+                                        modifier = Modifier.size(14.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove alternative",
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .shadow(elevation, shape = FilterChipDefaults.shape)
+                                    .longPressDraggableHandle()
+                            )
                         }
                     }
                 }
@@ -547,7 +651,7 @@ private fun RouteStopCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // Connector prices with per-speed availability
+                // Connector prices
                 val rpAvailByKw = charger.availabilityByKw
                 charger.connectorPriceSummaries.forEach { summary ->
                     val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
@@ -559,25 +663,55 @@ private fun RouteStopCard(
                         summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
                         else -> "—"
                     }
-                    val kwKey = summary.kilowatts?.toInt() ?: 0
-                    val (avail, inUse, fault) = rpAvailByKw[kwKey] ?: Triple(0, 0, 0)
-                    val availStr = buildString {
-                        if (avail > 0) append("$avail av")
-                        if (inUse > 0) { if (isNotEmpty()) append(" "); append("$inUse use") }
-                        if (fault > 0) { if (isNotEmpty()) append(" "); append("$fault fault${if (fault > 1) "s" else ""}") }
-                    }
                     Row(Modifier.fillMaxWidth()) {
                         Text(typeLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
                         Text(kwLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(54.dp), textAlign = TextAlign.End)
                         Text(priceLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(84.dp), textAlign = TextAlign.End)
-                        if (availStr.isNotEmpty()) Text(
-                            availStr,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
-                            modifier = Modifier.width(72.dp),
-                            textAlign = TextAlign.End
-                        )
                     }
+                }
+
+                // Time-based charges (charger-level, shown once below connector rows)
+                val ratesParts = listOfNotNull(
+                    charger.connectionFeeMajor?.let { "${currencySymbol}${"%.2f".format(it)} connection fee" },
+                    charger.chargingTimeRateMajor?.let { "${currencySymbol}${"%.2f".format(it)}/min charging" },
+                    charger.parkingTimeRateMajor?.let { "${currencySymbol}${"%.2f".format(it)}/min parking" }
+                )
+                if (ratesParts.isNotEmpty()) {
+                    Text(
+                        ratesParts.joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Per-speed availability summary
+                val availParts = rpAvailByKw.entries
+                    .sortedByDescending { it.key }
+                    .mapNotNull { (kw, counts) ->
+                        val (avail, inUse, fault) = counts
+                        val parts = listOfNotNull(
+                            if (avail > 0) "$avail av" else null,
+                            if (inUse > 0) "$inUse use" else null,
+                            if (fault > 0) "$fault fault${if (fault > 1) "s" else ""}" else null
+                        )
+                        if (parts.isEmpty()) null else "${kw}kW: ${parts.joinToString(" ")}"
+                    }
+                if (availParts.isNotEmpty()) {
+                    val hasAvailable = rpAvailByKw.values.any { it.first > 0 }
+                    Text(
+                        availParts.joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (hasAvailable) Color(0xFF2E7D32) else Color(0xFFF57F17)
+                    )
+                }
+                timeAgo(charger.cachedAt)?.let {
+                    Text(
+                        "Updated $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (charger.isStale) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 // Session cost block using stop's own SoC / stay
@@ -633,10 +767,12 @@ private fun RouteStopCard(
             Row(modifier = Modifier.fillMaxWidth()) {
                 if (charger != null) {
                     TextButton(
-                        onClick = onShowInfo,
+                        onClick = onShowOnMap,
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Text("Info", style = MaterialTheme.typography.labelSmall)
+                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Show", style = MaterialTheme.typography.labelSmall)
                     }
                     val lat = charger.coordinates.latitude
                     val lng = charger.coordinates.longitude
@@ -729,148 +865,3 @@ private fun RouteStopEditDialog(
     )
 }
 
-@Composable
-private fun ChargerInfoDialog(
-    charger: ChargingLocation,
-    session: ChargeSession?,
-    currencySymbol: String,
-    favouritePks: Set<Long>,
-    excludedPks: Set<Long>,
-    onToggleFavourite: () -> Unit,
-    onToggleExcluded: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(charger.name) },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text("${charger.address}, ${charger.city}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(charger.operator.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onToggleFavourite, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            if (charger.pk in favouritePks) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = null,
-                            tint = if (charger.pk in favouritePks) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    IconButton(onClick = onToggleExcluded, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            Icons.Default.Block,
-                            contentDescription = null,
-                            tint = if (charger.pk in excludedPks) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    if (charger.pk in favouritePks) Text("Favourite", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE53935))
-                    if (charger.pk in excludedPks) Text("Excluded", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
-                }
-
-                val altAvailByKw = charger.availabilityByKw
-                charger.connectorPriceSummaries.forEach { summary ->
-                    val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
-                    val kwLabel = summary.kilowatts?.let { kw -> if (kw % 1.0 == 0.0) "${kw.toInt()} kW" else "%.1f kW".format(kw) } ?: ""
-                    val priceLabel = when {
-                        summary.isFree -> "Free"
-                        summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
-                        else -> "—"
-                    }
-                    val kwKey = summary.kilowatts?.toInt() ?: 0
-                    val (avail, inUse, fault) = altAvailByKw[kwKey] ?: Triple(0, 0, 0)
-                    val availStr = buildString {
-                        if (avail > 0) append("$avail av")
-                        if (inUse > 0) { if (isNotEmpty()) append(" "); append("$inUse use") }
-                        if (fault > 0) { if (isNotEmpty()) append(" "); append("$fault fault${if (fault > 1) "s" else ""}") }
-                    }
-                    Row(Modifier.fillMaxWidth()) {
-                        Text(typeLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                        Text(kwLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(54.dp), textAlign = TextAlign.End)
-                        Text(priceLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(88.dp), textAlign = TextAlign.End)
-                        if (availStr.isNotEmpty()) Text(
-                            availStr,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
-                            modifier = Modifier.width(72.dp),
-                            textAlign = TextAlign.End
-                        )
-                    }
-                }
-                charger.connectionFeeMajor?.let { Text("+ %s%.2f connection fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                charger.chargingTimeRateMajor?.let { Text("+ %s%.2f/min while charging".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                charger.parkingTimeRateMajor?.let { Text("+ %s%.2f/min idle fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-
-                if (session != null) {
-                    val priceGroups = charger.connectorPriceSummaries
-                        .groupBy { it.pricePerKwh to it.isFree }
-                        .map { (_, group) -> group.first() }
-                        .sortedByDescending { it.kilowatts ?: 0.0 }
-                        .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
-                    val multiGroup = priceGroups.size > 1
-                    priceGroups.forEach { s ->
-                        val kw = s.kilowatts!!
-                        val price = if (s.isFree) 0.0 else s.pricePerKwh!!
-                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
-                        val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
-                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
-                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
-                        val optMins = optResult.chargeMinutes.toInt()
-                        val optSoc = optResult.endSocPercent.toInt()
-                        val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
-                        val staySoc = stayResult.endSocPercent.toInt()
-                        val fmt: (Double) -> String = { c -> if (s.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
-                        Row(verticalAlignment = Alignment.Top) {
-                            if (multiGroup) Text("${kw.toInt()} kW", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(52.dp))
-                            Column {
-                                Text("⚡ Optimal: $optLabel  ·  ${fmt(optCost)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                                Text("🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                    }
-                }
-
-                charger.availabilityByKw.entries.sortedByDescending { it.key }.forEach { (kw, counts) ->
-                    val (avail, inUse, fault) = counts
-                    if (avail + inUse + fault > 0) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("${kw}kW:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (avail > 0) Text("$avail avail", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
-                        if (inUse > 0) Text("$inUse in use", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF57F17))
-                        if (fault > 0) Text("$fault fault${if (fault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
-                    }
-                }
-                if (charger.isStale) Text("! Cached data may be out of date", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-            }
-        },
-        confirmButton = {
-            Row {
-                val lat = charger.coordinates.latitude
-                val lng = charger.coordinates.longitude
-                TextButton(onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")))
-                    onDismiss()
-                }) {
-                    Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Maps")
-                }
-                charger.externalId?.let { extId ->
-                    TextButton(onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://electroverse.octopus.energy/map?extId=$extId")))
-                        onDismiss()
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Electroverse")
-                    }
-                }
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } }
-    )
-}
