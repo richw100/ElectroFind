@@ -684,26 +684,47 @@ private fun RouteStopCard(
                     )
                 }
 
-                // Per-speed availability summary
-                val availParts = rpAvailByKw.entries
-                    .sortedByDescending { it.key }
-                    .mapNotNull { (kw, counts) ->
-                        val (avail, inUse, fault) = counts
-                        val parts = listOfNotNull(
-                            if (avail > 0) "$avail av" else null,
-                            if (inUse > 0) "$inUse use" else null,
-                            if (fault > 0) "$fault fault${if (fault > 1) "s" else ""}" else null
-                        )
-                        if (parts.isEmpty()) null else "${kw}kW: ${parts.joinToString(" ")}"
+                // Unified per-speed: availability + session cost
+                val session = ChargeSession(stop.arrivalSocPercent, stop.departureSocPercent, stop.stayMinutes)
+                val priceGroups = charger.connectorPriceSummaries
+                    .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
+                    .groupBy { it.kilowatts }
+                    .map { (_, group) -> group.first() }
+                val kwTiers = (rpAvailByKw.keys.map { it.toDouble() } + priceGroups.map { it.kilowatts!! })
+                    .distinct().sortedByDescending { it }
+                val multiSpeed = kwTiers.size > 1
+                kwTiers.forEach { kw ->
+                    val avail = rpAvailByKw[kw.toInt()]
+                    val pg = priceGroups.find { it.kilowatts == kw }
+                    Column(modifier = Modifier.padding(vertical = 1.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (multiSpeed) {
+                                Text("${kw.toInt()}kW", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            }
+                            avail?.let { (avl, inUse, fault) ->
+                                if (avl > 0) Text("$avl avail", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A))
+                                if (inUse > 0) Text("$inUse in use", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFF57F17))
+                                if (fault > 0) Text("$fault broken", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFB71C1C))
+                            }
+                        }
+                        if (pg != null) {
+                            val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
+                            val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                            val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                            val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                            val optMins = optResult.chargeMinutes.toInt()
+                            val optSoc = optResult.endSocPercent.toInt()
+                            val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
+                            val staySoc = stayResult.endSocPercent.toInt()
+                            val fmt: (Double) -> String = { c -> if (pg.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
+                            Text("⚡ Optimal: $optLabel  ·  ${fmt(optCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
-                if (availParts.isNotEmpty()) {
-                    val hasAvailable = rpAvailByKw.values.any { it.first > 0 }
-                    Text(
-                        availParts.joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (hasAvailable) Color(0xFF2E7D32) else Color(0xFFF57F17)
-                    )
                 }
                 timeAgo(charger.cachedAt)?.let {
                     Text(
@@ -712,39 +733,6 @@ private fun RouteStopCard(
                         color = if (charger.isStale) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-
-                // Session cost block using stop's own SoC / stay
-                val session = ChargeSession(stop.arrivalSocPercent, stop.departureSocPercent, stop.stayMinutes)
-                val priceGroups = charger.connectorPriceSummaries
-                    .groupBy { it.pricePerKwh to it.isFree }
-                    .map { (_, group) -> group.first() }
-                    .sortedByDescending { it.kilowatts ?: 0.0 }
-                    .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
-                if (priceGroups.isNotEmpty()) {
-                    val multiGroup = priceGroups.size > 1
-                    priceGroups.forEach { s ->
-                        val kw = s.kilowatts!!
-                        val price = if (s.isFree) 0.0 else s.pricePerKwh!!
-                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
-                        val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
-                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
-                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
-                        val optMins = optResult.chargeMinutes.toInt()
-                        val optSoc = optResult.endSocPercent.toInt()
-                        val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
-                        val staySoc = stayResult.endSocPercent.toInt()
-                        val fmt: (Double) -> String = { c -> if (s.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
-                        Row(verticalAlignment = Alignment.Top) {
-                            if (multiGroup) {
-                                Text("${kw.toInt()} kW", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(52.dp))
-                            }
-                            Column {
-                                Text("⚡ Optimal: $optLabel  ·  ${fmt(optCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                Text("🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                    }
                 }
             }
 

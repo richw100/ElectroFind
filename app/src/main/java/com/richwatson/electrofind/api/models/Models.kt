@@ -122,11 +122,11 @@ data class ChargingLocation(
     }
 
     val hasOutOfOrderEvse: Boolean get() = evses.edges.any {
-        it.node.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER")
+        it.node.status in setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER", "OUTOFORDER")
     }
 
     val availabilityByKw: Map<Int, Triple<Int, Int, Int>> get() {
-        val faultStatuses = setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER")
+        val faultStatuses = setOf("INOPERATIVE", "FAULTED", "UNAVAILABLE", "OUT_OF_ORDER", "OUTOFORDER")
         return evses.edges
             .map { it.node }
             .groupBy { evse ->

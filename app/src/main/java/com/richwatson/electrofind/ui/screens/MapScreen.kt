@@ -875,7 +875,7 @@ fun ChargerMapView(
                             if (availStr.isNotEmpty()) Text(
                                 availStr,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                                color = if (avail > 0) Color(0xFF66BB6A) else Color(0xFFF57F17),
                                 modifier = Modifier.width(72.dp),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.End
                             )
@@ -890,62 +890,50 @@ fun ChargerMapView(
                     charger.parkingTimeRateMajor?.let {
                         Text("+ %s%.2f/min idle fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (session != null) {
-                        val priceGroups = charger.connectorPriceSummaries
-                            .groupBy { it.pricePerKwh to it.isFree }
-                            .map { (_, group) -> group.first() }
-                            .sortedByDescending { it.kilowatts ?: 0.0 }
-                            .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
-                        val multiGroup = priceGroups.size > 1
-                        priceGroups.forEach { s ->
-                            val kw = s.kilowatts!!
-                            val price = if (s.isFree) 0.0 else s.pricePerKwh!!
-                            val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                            val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
-                            val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
-                            val optMins = optResult.chargeMinutes.toInt()
-                            val optSoc = optResult.endSocPercent.toInt()
-                            val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
-                            val staySoc = stayResult.endSocPercent.toInt()
-                            val fmt: (Double) -> String = { c -> if (s.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
-                            Row(verticalAlignment = androidx.compose.ui.Alignment.Top) {
-                                if (multiGroup) {
+                    // Unified per-speed: availability + session cost
+                    val popupPriceGroups = charger.connectorPriceSummaries
+                        .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
+                        .groupBy { it.kilowatts }
+                        .map { (_, group) -> group.first() }
+                    val popupKwTiers = (charger.availabilityByKw.keys.map { it.toDouble() } + popupPriceGroups.map { it.kilowatts!! })
+                        .distinct().sortedByDescending { it }
+                    val popupMultiSpeed = popupKwTiers.size > 1
+                    popupKwTiers.forEach { kw ->
+                        val avail = charger.availabilityByKw[kw.toInt()]
+                        val pg = popupPriceGroups.find { it.kilowatts == kw }
+                        Column(modifier = Modifier.padding(vertical = 1.dp)) {
+                            Row(
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (popupMultiSpeed) {
                                     Text(
-                                        "${kw.toInt()} kW",
+                                        "${kw.toInt()}kW",
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.width(52.dp)
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
-                                Column {
-                                    Text(
-                                        "⚡ Optimal: $optLabel  ·  ${fmt(optCost)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                avail?.let { (avl, inUse, fault) ->
+                                    if (avl > 0) Text("$avl avail", style = MaterialTheme.typography.bodySmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFF66BB6A))
+                                    if (inUse > 0) Text("$inUse in use", style = MaterialTheme.typography.bodySmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFFF57F17))
+                                    if (fault > 0) Text("$fault broken", style = MaterialTheme.typography.bodySmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = Color(0xFFB71C1C))
                                 }
                             }
-                        }
-                    }
-                    charger.availabilityByKw.entries.sortedByDescending { it.key }.forEach { (kw, counts) ->
-                        val (avail, inUse, fault) = counts
-                        val parts = listOfNotNull(
-                            if (avail > 0) avail.toString() + " avail" else null,
-                            if (inUse > 0) inUse.toString() + " in use" else null,
-                            if (fault > 0) fault.toString() + " fault${if (fault > 1) "s" else ""}" else null
-                        )
-                        if (parts.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("${kw}kW:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (avail > 0) Text("$avail avail", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
-                            if (inUse > 0) Text("$inUse in use", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF57F17))
-                            if (fault > 0) Text("$fault fault${if (fault > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                            if (session != null && pg != null) {
+                                val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
+                                val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
+                                val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                                val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
+                                val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                                val optMins = optResult.chargeMinutes.toInt()
+                                val optSoc = optResult.endSocPercent.toInt()
+                                val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
+                                val staySoc = stayResult.endSocPercent.toInt()
+                                val fmt: (Double) -> String = { c -> if (pg.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
+                                Text("⚡ Optimal: $optLabel  ·  ${fmt(optCost)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                Text("🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
                     timeAgo(charger.cachedAt)?.let {

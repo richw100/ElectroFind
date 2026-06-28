@@ -150,7 +150,7 @@ fun ResultsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            if (nAvailable > 0) Text("● $nAvailable available", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                            if (nAvailable > 0) Text("● $nAvailable available", style = MaterialTheme.typography.labelSmall, color = Color(0xFF66BB6A))
                             if (nInUse > 0) Text("● $nInUse in use", style = MaterialTheme.typography.labelSmall, color = Color(0xFFF57F17))
                             if (nOutOfOrder > 0) Text("● $nOutOfOrder out of order", style = MaterialTheme.typography.labelSmall, color = Color(0xFFB71C1C))
                         }
@@ -549,7 +549,7 @@ private fun ChargerCard(
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val (availText, availColor) = when {
-                    charger.hasAvailableEvse  -> "Available"    to Color(0xFF2E7D32)
+                    charger.hasAvailableEvse  -> "Available"    to Color(0xFF66BB6A)
                     charger.hasOutOfOrderEvse -> "Out of order" to Color(0xFFB71C1C)
                     else                      -> "In use"       to Color(0xFFF57F17)
                 }
@@ -741,7 +741,7 @@ private fun ConnectorPriceRow(
             Text(
                 availStr,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (avail > 0) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                color = if (avail > 0) Color(0xFF66BB6A) else Color(0xFFF57F17),
                 modifier = Modifier.width(72.dp),
                 textAlign = TextAlign.End
             )
