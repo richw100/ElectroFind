@@ -23,6 +23,7 @@ import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.ChargerRepository
+import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.util.KonaChargeCurve
 import android.util.Log
 import kotlinx.coroutines.delay
@@ -97,13 +98,19 @@ class StopDetailScreen(
         stop.chargerPks.forEachIndexed { idx, pk ->
             val charger = chargerMap[pk] ?: return@forEachIndexed
             val prefix = if (idx == stop.activeIndex) "★ " else ""
-            val onSelect = if (idx != stop.activeIndex) {
-                { saveStop(stop.copy(activeIndex = idx)); Unit }
-            } else null
+            val onSelect: (() -> Unit) = if (idx != stop.activeIndex) {
+                { saveStop(stop.copy(activeIndex = idx)) }
+            } else {
+                { screenManager.push(editMenuScreen()) }
+            }
             listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, onSelect))
         }
 
-        val updatedSuffix = lastRefreshed?.let { " · Updated $it" } ?: ""
+        val updatedSuffix = when {
+            lastRefreshed != null -> " · Updated $lastRefreshed"
+            activeCharger.cachedAt > 0L -> " · Data: ${timeAgo(activeCharger.cachedAt)}"
+            else -> ""
+        }
         return ListTemplate.Builder()
             .setTitle(stop.displayName(stop.chargerPks.indexOf(stop.activePk)) + updatedSuffix)
             .setHeaderAction(Action.BACK)
@@ -118,7 +125,7 @@ class StopDetailScreen(
             .build()
     }
 
-    private fun chargerRow(charger: ChargingLocation, prefix: String, stop: RouteStop, navigateIcon: CarIcon, onSelect: (() -> Unit)? = null): Row {
+    private fun chargerRow(charger: ChargingLocation, prefix: String, stop: RouteStop, navigateIcon: CarIcon, onSelect: () -> Unit): Row {
         val availByKw = charger.availabilityByKw
 
         val line1 = charger.connectorPriceSummaries
@@ -161,7 +168,7 @@ class StopDetailScreen(
             .apply {
                 if (line1.isNotEmpty()) addText(line1)
                 if (line2.isNotEmpty()) addText(line2)
-                if (onSelect != null) setOnClickListener(onSelect)
+                setOnClickListener(onSelect)
             }
             .addAction(
                 Action.Builder()
@@ -238,46 +245,47 @@ class StopDetailScreen(
 
     private fun stayTimePickerScreen(currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
         object : Screen(carContext) {
-            private var selectedHours: Int? = null
-
             override fun onGetTemplate(): Template {
-                val h = selectedHours
-                if (h == null) {
-                    val curHours = currentMinutes / 60
-                    val listBuilder = ItemList.Builder()
-                    (0..5).forEach { hours ->
-                        listBuilder.addItem(Row.Builder()
-                            .setTitle("${if (hours == curHours) "★ " else ""}$hours hour${if (hours != 1) "s" else ""}")
-                            .setOnClickListener { selectedHours = hours; invalidate() }
-                            .build())
-                    }
-                    return ListTemplate.Builder()
-                        .setTitle("Stay time")
-                        .setHeaderAction(Action.BACK)
-                        .setSingleList(listBuilder.build())
-                        .build()
-                } else {
-                    val curMins = currentMinutes % 60
-                    val minuteOptions = if (h == 0) listOf(10, 20, 30, 40, 50) else listOf(0, 10, 20, 30, 40, 50)
-                    val listBuilder = ItemList.Builder()
-                    minuteOptions.forEach { mins ->
-                        val total = h * 60 + mins
-                        val isCur = h == currentMinutes / 60 && mins == curMins
-                        listBuilder.addItem(Row.Builder()
-                            .setTitle("${if (isCur) "★ " else ""}$h h ${"%02d".format(mins)} min")
-                            .setOnClickListener { onConfirm(total); screenManager.pop() }
-                            .build())
-                    }
-                    return ListTemplate.Builder()
-                        .setTitle("Stay time — $h hour${if (h != 1) "s" else ""}")
-                        .setHeaderAction(Action.BACK)
-                        .setSingleList(listBuilder.build())
-                        .addAction(Action.Builder()
-                            .setTitle("← Hours")
-                            .setOnClickListener { selectedHours = null; invalidate() }
-                            .build())
-                        .build()
+                val curHours = currentMinutes / 60
+                val listBuilder = ItemList.Builder()
+                (0..5).forEach { hours ->
+                    listBuilder.addItem(Row.Builder()
+                        .setTitle("${if (hours == curHours) "★ " else ""}$hours hour${if (hours != 1) "s" else ""}")
+                        .setOnClickListener {
+                            screenManager.push(stayMinutePickerScreen(hours, currentMinutes, onConfirm))
+                        }
+                        .build())
                 }
+                return ListTemplate.Builder()
+                    .setTitle("Stay time — select hours")
+                    .setHeaderAction(Action.BACK)
+                    .setSingleList(listBuilder.build())
+                    .build()
+            }
+        }
+
+    private fun stayMinutePickerScreen(hours: Int, currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
+        object : Screen(carContext) {
+            override fun onGetTemplate(): Template {
+                val minuteOptions = if (hours == 0) (1..11).map { it * 5 }
+                                    else (0..11).map { it * 5 }
+                val listBuilder = ItemList.Builder()
+                minuteOptions.forEach { mins ->
+                    val total = hours * 60 + mins
+                    listBuilder.addItem(Row.Builder()
+                        .setTitle("${if (total == currentMinutes) "★ " else ""}$hours h ${"%02d".format(mins)} min")
+                        .setOnClickListener {
+                            onConfirm(total)
+                            screenManager.pop() // minutes → hours
+                            screenManager.pop() // hours → edit menu
+                        }
+                        .build())
+                }
+                return ListTemplate.Builder()
+                    .setTitle("Stay time — $hours hour${if (hours != 1) "s" else ""}, select minutes")
+                    .setHeaderAction(Action.BACK)
+                    .setSingleList(listBuilder.build())
+                    .build()
             }
         }
 
