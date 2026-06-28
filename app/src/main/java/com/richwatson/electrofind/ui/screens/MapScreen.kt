@@ -115,6 +115,8 @@ fun BrowseMapScreen(
     var suggestionsExpanded by remember { mutableStateOf(false) }
     var pendingCenter by remember { mutableStateOf<GeoPoint?>(null) }
     var fieldFocused by remember { mutableStateOf(false) }
+    var priceMode by remember { mutableStateOf(MapPriceMode.PER_KWH) }
+    var showFilters by remember { mutableStateOf(false) }
     // Tracks the visible map centre so "Search here" always searches where the map is.
     var mapCenterLat by remember {
         mutableStateOf(if (state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0) state.savedMapCenterLat else initialLat)
@@ -122,6 +124,8 @@ fun BrowseMapScreen(
     var mapCenterLng by remember {
         mutableStateOf(if (state.savedMapCenterLat != 0.0 || state.savedMapCenterLng != 0.0) state.savedMapCenterLng else initialLng)
     }
+    val chargers = remember(state) { chargerViewModel.filteredSortedFavouriteChargers }
+    val session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes, state.activeProfile)
 
     LaunchedEffect(searchText) {
         if (searchText.length >= 2) {
@@ -141,10 +145,32 @@ fun BrowseMapScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Browse map") },
+                title = {
+                    Column {
+                        Text("Browse map · ${chargers.size} chargers", style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(
+                                MapPriceMode.PER_KWH to "/kWh",
+                                MapPriceMode.OPTIMAL_COST to "Optimal",
+                                MapPriceMode.STAY_COST to "Stay"
+                            ).forEach { (mode, label) ->
+                                FilterChip(
+                                    selected = priceMode == mode,
+                                    onClick = { priceMode = mode },
+                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showFilters = !showFilters }) {
+                        Icon(Icons.Default.FilterList, "Filter")
                     }
                 }
             )
@@ -159,7 +185,7 @@ fun BrowseMapScreen(
             val savedLng = state.savedMapCenterLng
             val hasSaved = savedLat != 0.0 || savedLng != 0.0
             ChargerMapView(
-                chargers = state.favouriteChargers + state.customChargers,
+                chargers = chargers,
                 searchLat = initialLat,
                 searchLng = initialLng,
                 initialZoom = if (hasSaved) state.savedMapZoom else 8.0,
@@ -167,6 +193,8 @@ fun BrowseMapScreen(
                 centerOn = pendingCenter,
                 radiusMiles = 0,
                 currencySymbol = state.currencySymbol,
+                session = session,
+                priceMode = priceMode,
                 favouritePks = state.favouritePks,
                 excludedPks = state.excludedPks,
                 onToggleFavourite = { chargerViewModel.toggleFavourite(it) },
@@ -189,6 +217,16 @@ fun BrowseMapScreen(
                 onLocationSelected = onLocationSelected,
                 onAddCustomCharger = onAddCustomCharger
             )
+            if (showFilters) {
+                FilterBar(
+                    chargerViewModel,
+                    showSort = false,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .verticalScroll(rememberScrollState())
+                )
+            }
 
             // "Search here" button — searches at whatever the map is centred on
             ElevatedButton(

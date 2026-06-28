@@ -141,47 +141,56 @@ class ChargerViewModel(
         _state.update { it.copy(rawCustomChargers = raw, customChargers = raw.map { c -> c.toChargingLocation() }) }
     }
 
+    private fun applyFiltersAndSort(source: List<ChargingLocation>, s: SearchState): List<ChargingLocation> {
+        var list = source
+        if (s.hideExcluded) list = list.filter { it.pk !in s.excludedPks }
+        list = when (s.speedFilter) {
+            SpeedFilter.ALL -> list
+            SpeedFilter.FAST -> list.filter { it.maxKilowatts?.let { kw -> kw >= 7 } == true }
+            SpeedFilter.RAPID -> list.filter { it.maxKilowatts?.let { kw -> kw >= 22 } == true }
+            SpeedFilter.DC_FAST -> list.filter { it.maxKilowatts?.let { kw -> kw >= 50 } == true }
+            SpeedFilter.ULTRA -> list.filter { it.maxKilowatts?.let { kw -> kw >= 100 } == true }
+        }
+        s.maxSpeedKw?.let { max -> list = list.filter { (it.maxKilowatts ?: 0.0) <= max } }
+        if (s.connectorFilters.isNotEmpty()) {
+            list = list.filter { charger ->
+                charger.connectorTypes.any { ct ->
+                    s.connectorFilters.any { f -> ct.contains(f, ignoreCase = true) }
+                }
+            }
+        }
+        s.minPriceKwh?.let { min -> list = list.filter { (it.pricePerKwh ?: 0.0) >= min } }
+        s.maxPriceKwh?.let { max -> list = list.filter { (it.pricePerKwh ?: 0.0) <= max } }
+        s.minOptimalCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, null) ?: 0.0) >= min } }
+        s.maxOptimalCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, null) ?: Double.MAX_VALUE) <= max } }
+        s.minStayCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: 0.0) >= min } }
+        s.maxStayCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: Double.MAX_VALUE) <= max } }
+        list = when (s.sortOrder) {
+            SortOrder.PRICE_ASC -> list.sortedBy { it.pricePerKwh ?: Double.MAX_VALUE }
+            SortOrder.PRICE_DESC -> list.sortedByDescending { it.pricePerKwh ?: -1.0 }
+            SortOrder.SPEED_DESC -> list.sortedByDescending { it.maxKilowatts ?: 0.0 }
+            SortOrder.OPTIMAL_COST_ASC -> list.sortedBy { charger ->
+                charger.simCost(s, stayMinutes = null) ?: Double.MAX_VALUE
+            }
+            SortOrder.STAY_COST_ASC -> list.sortedBy { charger ->
+                charger.simCost(s, stayMinutes = s.stayMinutes.toDouble()) ?: Double.MAX_VALUE
+            }
+        }
+        return list
+    }
+
     val filteredSortedChargers: List<ChargingLocation>
         get() {
             val s = _state.value
             var list = s.chargers + s.customChargers
             if (s.showOnlyFavourites) list = list.filter { it.pk in s.favouritePks || it.pk < 0 }
-            if (s.hideExcluded) list = list.filter { it.pk !in s.excludedPks }
-            list = when (s.speedFilter) {
-                SpeedFilter.ALL -> list
-                SpeedFilter.FAST -> list.filter { it.maxKilowatts?.let { kw -> kw >= 7 } == true }
-                SpeedFilter.RAPID -> list.filter { it.maxKilowatts?.let { kw -> kw >= 22 } == true }
-                SpeedFilter.DC_FAST -> list.filter { it.maxKilowatts?.let { kw -> kw >= 50 } == true }
-                SpeedFilter.ULTRA -> list.filter { it.maxKilowatts?.let { kw -> kw >= 100 } == true }
-            }
-            s.maxSpeedKw?.let { max -> list = list.filter { (it.maxKilowatts ?: 0.0) <= max } }
-            if (s.connectorFilters.isNotEmpty()) {
-                list = list.filter { charger ->
-                    charger.connectorTypes.any { ct ->
-                        s.connectorFilters.any { f -> ct.contains(f, ignoreCase = true) }
-                    }
-                }
-            }
+            return applyFiltersAndSort(list, s)
+        }
 
-            s.minPriceKwh?.let { min -> list = list.filter { (it.pricePerKwh ?: 0.0) >= min } }
-            s.maxPriceKwh?.let { max -> list = list.filter { (it.pricePerKwh ?: 0.0) <= max } }
-            s.minOptimalCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, null) ?: 0.0) >= min } }
-            s.maxOptimalCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, null) ?: Double.MAX_VALUE) <= max } }
-            s.minStayCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: 0.0) >= min } }
-            s.maxStayCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: Double.MAX_VALUE) <= max } }
-
-            list = when (s.sortOrder) {
-                SortOrder.PRICE_ASC -> list.sortedBy { it.pricePerKwh ?: Double.MAX_VALUE }
-                SortOrder.PRICE_DESC -> list.sortedByDescending { it.pricePerKwh ?: -1.0 }
-                SortOrder.SPEED_DESC -> list.sortedByDescending { it.maxKilowatts ?: 0.0 }
-                SortOrder.OPTIMAL_COST_ASC -> list.sortedBy { charger ->
-                    charger.simCost(s, stayMinutes = null) ?: Double.MAX_VALUE
-                }
-                SortOrder.STAY_COST_ASC -> list.sortedBy { charger ->
-                    charger.simCost(s, stayMinutes = s.stayMinutes.toDouble()) ?: Double.MAX_VALUE
-                }
-            }
-            return list
+    val filteredSortedFavouriteChargers: List<ChargingLocation>
+        get() {
+            val s = _state.value
+            return applyFiltersAndSort(s.favouriteChargers + s.customChargers, s)
         }
 
     fun searchByPlaceName(name: String, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
