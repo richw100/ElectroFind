@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.graphics.Color
@@ -215,7 +216,8 @@ fun BrowseMapScreen(
                     suggestionsExpanded = false
                 },
                 onLocationSelected = onLocationSelected,
-                onAddCustomCharger = onAddCustomCharger
+                onAddCustomCharger = onAddCustomCharger,
+                onRefreshCharger = { pk -> chargerViewModel.refreshCharger(pk) }
             )
             if (showFilters) {
                 FilterBar(
@@ -482,7 +484,8 @@ fun ResultsMapScreen(
                 },
                 onLocationSelected = { lat, lng, label ->
                     chargerViewModel.searchByCoordinates(lat, lng, label = label, reverseGeocodePrefix = if (label == null) "Map pin" else null)
-                }
+                },
+                onRefreshCharger = { pk -> chargerViewModel.refreshCharger(pk) }
             )
             if (showFilters) {
                 FilterBar(
@@ -526,10 +529,12 @@ fun ChargerMapView(
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onMapTapped: () -> Unit = {},
     onLocationSelected: ((Double, Double, String?) -> Unit)? = null,
-    onAddCustomCharger: ((Double, Double) -> Unit)? = null
+    onAddCustomCharger: ((Double, Double) -> Unit)? = null,
+    onRefreshCharger: ((Long) -> Unit)? = null
 ) {
     val context = LocalContext()
-    var dialogCharger by remember { mutableStateOf<ChargingLocation?>(null) }
+    var dialogChargerPk by remember { mutableStateOf<Long?>(null) }
+    val dialogCharger = dialogChargerPk?.let { pk -> chargers.find { it.pk == pk } }
     var routeAddCharger by remember { mutableStateOf<ChargingLocation?>(null) }
     var myLocationPoint by remember { mutableStateOf<GeoPoint?>(null) }
     var longPressPoint by remember { mutableStateOf<GeoPoint?>(null) }
@@ -617,11 +622,11 @@ fun ChargerMapView(
                     when (priceMode) {
                         MapPriceMode.OPTIMAL_COST -> {
                             val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes)
+                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes, charger.gracePeriodMinutes)
                         }
                         MapPriceMode.STAY_COST -> {
                             val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
                         }
                         else -> null
                     }
@@ -685,7 +690,7 @@ fun ChargerMapView(
                             val stayMins = if (priceMode == MapPriceMode.STAY_COST) session.stayMinutes.toDouble() else sim.chargeMinutes
                             val cost = KonaChargeCurve.totalCost(sim, s.pricePerKwh,
                                 charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0,
-                                charger.parkingTimeRateMajor ?: 0.0, stayMins)
+                                charger.parkingTimeRateMajor ?: 0.0, stayMins, charger.gracePeriodMinutes)
                             "%s%.2f".format(currencySymbol, cost)
                         }
                         s.pricePerKwh != null -> "%s%.2f".format(currencySymbol, s.pricePerKwh)
@@ -730,7 +735,7 @@ fun ChargerMapView(
                 )
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
-                    dialogCharger = charger
+                    dialogChargerPk = charger.pk
                     true
                 }
             }
@@ -810,7 +815,7 @@ fun ChargerMapView(
 
     dialogCharger?.let { charger ->
         AlertDialog(
-            onDismissRequest = { dialogCharger = null },
+            onDismissRequest = { dialogChargerPk = null },
             title = { Text(charger.name) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -846,6 +851,19 @@ fun ChargerMapView(
                                 tint = if (charger.pk in excludedPks) Color(0xFFE65100) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                 modifier = Modifier.size(18.dp)
                             )
+                        }
+                        if (onRefreshCharger != null) {
+                            IconButton(
+                                onClick = { onRefreshCharger(charger.pk) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                         if (charger.pk in favouritePks) Text("Favourite", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE53935))
                         if (charger.pk in excludedPks) Text("Excluded", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
@@ -923,9 +941,9 @@ fun ChargerMapView(
                             if (session != null && pg != null) {
                                 val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
                                 val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                                val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                                val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes)
                                 val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                                val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                                val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
                                 val optMins = optResult.chargeMinutes.toInt()
                                 val optSoc = optResult.endSocPercent.toInt()
                                 val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
@@ -954,7 +972,7 @@ fun ChargerMapView(
                         onClick = {
                             val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
                             context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                            dialogCharger = null
+                            dialogChargerPk = null
                         },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
@@ -967,7 +985,7 @@ fun ChargerMapView(
                             onClick = {
                                 val uri = Uri.parse("https://electroverse.octopus.energy/map?extId=${charger.externalId}")
                                 context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                                dialogCharger = null
+                                dialogChargerPk = null
                             },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
@@ -979,7 +997,7 @@ fun ChargerMapView(
                     TextButton(
                         onClick = {
                             routeAddCharger = charger
-                            dialogCharger = null
+                            dialogChargerPk = null
                         },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
@@ -989,7 +1007,7 @@ fun ChargerMapView(
                     }
                 }
             },
-            dismissButton = { TextButton(onClick = { dialogCharger = null }) { Text("Close") } }
+            dismissButton = { TextButton(onClick = { dialogChargerPk = null }) { Text("Close") } }
         )
     }
 

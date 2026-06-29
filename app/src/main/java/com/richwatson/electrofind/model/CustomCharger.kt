@@ -25,6 +25,7 @@ data class CustomCharger(
     val idleRatePerMin: Double = 0.0,
     val maxKilowatts: Double = 50.0,
     val connectorType: String = "CCS",
+    val gracePeriodMinutes: Int = 0
 )
 
 private val GBP = CurrencyDetails(symbol = "£", decimalDigits = 2, minorUnitConversion = 100)
@@ -35,6 +36,7 @@ fun CustomCharger.toChargingLocation(): ChargingLocation {
         if (connectionFeeGbp > 0) add(PriceComponentDto("ConnectionFee", GBP, (connectionFeeGbp * 100).toInt()))
         if (chargingRatePerMin > 0) add(PriceComponentDto("TimeRate", GBP, (chargingRatePerMin * 100).toInt()))
         if (idleRatePerMin > 0) add(PriceComponentDto("ParkingTimeRate", GBP, (idleRatePerMin * 100).toInt()))
+        if (gracePeriodMinutes > 0) add(PriceComponentDto("GracePeriod", null, gracePeriodMinutes))
     }
     val speed = when {
         maxKilowatts < 7.4 -> "SLOW"

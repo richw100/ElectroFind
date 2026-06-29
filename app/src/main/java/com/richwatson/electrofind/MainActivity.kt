@@ -137,17 +137,6 @@ class MainActivity : ComponentActivity() {
                                     label = { Text("Settings", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
-                                    selected = currentRoute == "about",
-                                    onClick = {
-                                        navController.navigate("about") {
-                                            popUpTo("search")
-                                            launchSingleTop = true
-                                        }
-                                    },
-                                    icon = { Icon(Icons.Default.Info, null) },
-                                    label = { Text("About", fontSize = 10.sp) }
-                                )
-                                NavigationBarItem(
                                     selected = currentRoute in listOf("custom_chargers", "custom_charger_form"),
                                     onClick = {
                                         navController.navigate("custom_chargers") {
@@ -157,6 +146,17 @@ class MainActivity : ComponentActivity() {
                                     },
                                     icon = { Icon(Icons.Default.AddCircle, null) },
                                     label = { Text("Mine", fontSize = 10.sp) }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute == "about",
+                                    onClick = {
+                                        navController.navigate("about") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Info, null) },
+                                    label = { Text("About", fontSize = 10.sp) }
                                 )
                             }
                         }

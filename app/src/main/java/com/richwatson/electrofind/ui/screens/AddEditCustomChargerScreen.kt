@@ -63,6 +63,7 @@ fun AddEditCustomChargerScreen(
     var connectionFee by remember(existing) { mutableStateOf(if (existing?.connectionFeeGbp != null && existing.connectionFeeGbp > 0) "%.2f".format(existing.connectionFeeGbp) else "") }
     var chargingRate by remember(existing) { mutableStateOf(if (existing?.chargingRatePerMin != null && existing.chargingRatePerMin > 0) "%.3f".format(existing.chargingRatePerMin) else "") }
     var idleRate by remember(existing) { mutableStateOf(if (existing?.idleRatePerMin != null && existing.idleRatePerMin > 0) "%.3f".format(existing.idleRatePerMin) else "") }
+    var gracePeriod by remember(existing) { mutableStateOf(if (existing?.gracePeriodMinutes != null && existing.gracePeriodMinutes > 0) existing.gracePeriodMinutes.toString() else "") }
     var maxKw by remember(existing) { mutableStateOf(if (existing != null) "%.0f".format(existing.maxKilowatts) else "50") }
     var connectorType by remember(existing) { mutableStateOf(existing?.connectorType ?: "CCS") }
     var connectorExpanded by remember { mutableStateOf(false) }
@@ -165,6 +166,14 @@ fun AddEditCustomChargerScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 placeholder = { Text("e.g. 0.010") }
             )
+            OutlinedTextField(
+                value = gracePeriod,
+                onValueChange = { gracePeriod = it },
+                label = { Text("Grace period (free minutes, optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                placeholder = { Text("e.g. 60") }
+            )
 
             Text("Hardware", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(
@@ -227,7 +236,8 @@ fun AddEditCustomChargerScreen(
                             chargingRatePerMin = chargingRate.toDoubleOrNull() ?: 0.0,
                             idleRatePerMin = idleRate.toDoubleOrNull() ?: 0.0,
                             maxKilowatts = maxKw.toDoubleOrNull() ?: 50.0,
-                            connectorType = connectorType
+                            connectorType = connectorType,
+                            gracePeriodMinutes = gracePeriod.toIntOrNull() ?: 0
                         )
                         if (isEdit) chargerViewModel.updateCustomCharger(charger)
                         else chargerViewModel.addCustomCharger(charger)

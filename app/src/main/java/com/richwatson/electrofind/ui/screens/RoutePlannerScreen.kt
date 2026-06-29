@@ -26,6 +26,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -238,8 +240,8 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
     editStop?.let { stop ->
         RouteStopEditDialog(
             stop = stop,
-            onConfirm = { arrival, departure, stay ->
-                chargerViewModel.updateRouteStop(stop.id, arrival, departure, stay)
+            onConfirm = { arrival, departure, stay, arrivalTime ->
+                chargerViewModel.updateRouteStop(stop.id, arrival, departure, stay, arrivalTime)
                 editStop = null
             },
             onDismiss = { editStop = null }
@@ -713,9 +715,9 @@ private fun RouteStopCard(
                         if (pg != null) {
                             val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
                             val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
-                            val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                            val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes)
                             val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
-                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
                             val optMins = optResult.chargeMinutes.toInt()
                             val optSoc = optResult.endSocPercent.toInt()
                             val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
@@ -822,12 +824,14 @@ private fun RouteStopCard(
 @Composable
 private fun RouteStopEditDialog(
     stop: RouteStop,
-    onConfirm: (Int, Int, Int) -> Unit,
+    onConfirm: (Int, Int, Int, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     var arrival by remember { mutableFloatStateOf(stop.arrivalSocPercent.toFloat()) }
     var departure by remember { mutableFloatStateOf(stop.departureSocPercent.toFloat()) }
-    var stay by remember { mutableFloatStateOf((stop.stayMinutes / 5f).coerceIn(0f, 36f)) }
+    var stay by remember { mutableFloatStateOf((stop.stayMinutes / 5f).coerceIn(0f, 144f)) }
+    var arrivalHour by remember { mutableIntStateOf(stop.arrivalTimeMinutes / 60) }
+    var arrivalHalf by remember { mutableStateOf(stop.arrivalTimeMinutes % 60 >= 30) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -840,12 +844,33 @@ private fun RouteStopEditDialog(
                 Text("Departure SoC: ${departure.toInt()}%", style = MaterialTheme.typography.bodySmall)
                 Slider(value = departure, onValueChange = { departure = it }, valueRange = 0f..100f, steps = 99)
 
-                Text("Stay time: ${(stay.toInt() * 5)} min", style = MaterialTheme.typography.bodySmall)
-                Slider(value = stay, onValueChange = { stay = it }, valueRange = 0f..36f, steps = 35)
+                val stayMins = stay.toInt() * 5
+                val stayLabel = if (stayMins < 60) "$stayMins min" else "${stayMins / 60}h ${"%02d".format(stayMins % 60)}min"
+                Text("Stay time: $stayLabel", style = MaterialTheme.typography.bodySmall)
+                Slider(value = stay, onValueChange = { stay = it }, valueRange = 0f..144f, steps = 143)
+
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Arrive:", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { if (arrivalHour > 0) arrivalHour-- }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Remove, contentDescription = "Earlier", modifier = Modifier.size(16.dp))
+                    }
+                    Text("%02d:%s".format(arrivalHour, if (arrivalHalf) "30" else "00"), style = MaterialTheme.typography.bodySmall)
+                    IconButton(onClick = { if (arrivalHour < 23) arrivalHour++ }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Add, contentDescription = "Later", modifier = Modifier.size(16.dp))
+                    }
+                    FilterChip(
+                        selected = arrivalHalf,
+                        onClick = { arrivalHalf = !arrivalHalf },
+                        label = { Text(if (arrivalHalf) ":30" else ":00", style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(arrival.toInt(), departure.toInt(), stay.toInt() * 5) }) {
+            TextButton(onClick = {
+                val arrivalTime = arrivalHour * 60 + if (arrivalHalf) 30 else 0
+                onConfirm(arrival.toInt(), departure.toInt(), stay.toInt() * 5, arrivalTime)
+            }) {
                 Text("Save")
             }
         },

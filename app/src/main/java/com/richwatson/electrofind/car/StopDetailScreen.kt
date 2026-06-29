@@ -133,8 +133,8 @@ class StopDetailScreen(
             .distinctBy { it.first }
             .sortedByDescending { it.first }
             .take(3)
-            .joinToString(" · ") { (kw, s) ->
-                val (avail, inUse, _) = availByKw[kw] ?: Triple(0, 0, 0)
+            .joinToString(" | ") { (kw, s) ->
+                val (avail, inUse, fault) = availByKw[kw] ?: Triple(0, 0, 0)
                 val mins = KonaChargeCurve.simulate(
                     stop.arrivalSocPercent.toFloat(),
                     stop.departureSocPercent.toFloat(),
@@ -142,22 +142,23 @@ class StopDetailScreen(
                     profile = CarProfile.KONA_LR
                 ).chargeMinutes
                 val avParts = listOfNotNull(
-                    if (avail > 0) "${avail}av" else null,
-                    if (inUse > 0) "${inUse}use" else null
-                ).joinToString(" ")
-                "${kw}kW${if (avParts.isNotEmpty()) ": $avParts" else ""} ${formatMins(mins)}"
+                    if (avail > 0) "${avail}a" else null,
+                    if (inUse > 0) "${inUse}u" else null,
+                    if (fault > 0) "${fault}x" else null
+                ).joinToString("")
+                "${kw}kW${if (avParts.isNotEmpty()) " $avParts" else ""} ${formatMins(mins)}"
             }
 
         val connectorTypes = charger.connectorPriceSummaries
-            .map { it.type }
+            .map { abbreviateConnectorType(it.type) }
             .distinct()
             .filter { it.isNotEmpty() }
 
         val costText = buildCostText(charger, stop)
         val line2Parts = mutableListOf<String>()
         if (costText.isNotEmpty()) line2Parts.add(costText)
-        if (connectorTypes.isNotEmpty()) line2Parts.add(connectorTypes.joinToString(", "))
-        val line2 = line2Parts.joinToString("  ·  ")
+        if (connectorTypes.isNotEmpty()) line2Parts.add(connectorTypes.joinToString("/"))
+        val line2 = line2Parts.joinToString(" · ")
 
         val lat = charger.coordinates.latitude
         val lng = charger.coordinates.longitude
@@ -183,7 +184,17 @@ class StopDetailScreen(
 
     private fun formatMins(minutes: Double): String {
         val m = minutes.roundToInt()
-        return if (m < 60) "~${m}min" else "~${m / 60}h ${"%02d".format(m % 60)}m"
+        return if (m < 60) "~${m}m" else "~${m / 60}h${"%02d".format(m % 60)}m"
+    }
+
+    private fun abbreviateConnectorType(type: String): String = when {
+        type.contains("COMBO", ignoreCase = true) || type.contains("CCS", ignoreCase = true) -> "CCS"
+        type.contains("CHADEMO", ignoreCase = true) -> "CHAdeMO"
+        type.contains("TYPE_2", ignoreCase = true) || type.contains("TYPE 2", ignoreCase = true) -> "T2"
+        type.contains("TYPE_1", ignoreCase = true) || type.contains("TYPE 1", ignoreCase = true) -> "T1"
+        type.contains("TESLA", ignoreCase = true) || type.contains("NACS", ignoreCase = true) -> "Tesla"
+        type.isBlank() -> ""
+        else -> type.take(6)
     }
 
     private fun buildCostText(charger: ChargingLocation, stop: RouteStop): String {
@@ -192,6 +203,7 @@ class StopDetailScreen(
         val connectionFee = charger.connectionFeeMajor ?: 0.0
         val chargingRate = charger.chargingTimeRateMajor ?: 0.0
         val parkingRate = charger.parkingTimeRateMajor ?: 0.0
+        val gracePeriod = charger.gracePeriodMinutes
 
         val optResult = KonaChargeCurve.simulate(
             stop.arrivalSocPercent.toFloat(),
@@ -200,7 +212,7 @@ class StopDetailScreen(
             stayMinutes = null,
             profile = CarProfile.KONA_LR
         )
-        val optCost = KonaChargeCurve.totalCost(optResult, price, connectionFee, chargingRate, parkingRate)
+        val optCost = KonaChargeCurve.totalCost(optResult, price, connectionFee, chargingRate, parkingRate, gracePeriodMinutes = gracePeriod)
 
         val stayResult = KonaChargeCurve.simulate(
             stop.arrivalSocPercent.toFloat(),
@@ -209,13 +221,13 @@ class StopDetailScreen(
             stayMinutes = stop.stayMinutes.toDouble(),
             profile = CarProfile.KONA_LR
         )
-        val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble())
+        val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble(), gracePeriod)
 
         return buildString {
-            append("Optimal £${"%.2f".format(optCost)} · Stay £${"%.2f".format(stayCost)}")
-            if (connectionFee > 0) append(" · £${"%.2f".format(connectionFee)} conn fee")
-            if (chargingRate > 0) append(" · £${"%.2f".format(chargingRate)}/min")
-            if (parkingRate > 0) append(" · £${"%.2f".format(parkingRate)}/min parking")
+            append("Opt £${"%.2f".format(optCost)} Stay £${"%.2f".format(stayCost)}")
+            if (connectionFee > 0) append(" +£${"%.2f".format(connectionFee)}")
+            if (chargingRate > 0) append(" +£${"%.2f".format(chargingRate)}/m")
+            if (parkingRate > 0) append(" +£${"%.2f".format(parkingRate)}/m park")
         }
     }
 
@@ -242,6 +254,50 @@ class StopDetailScreen(
                 .build()
         }
     }
+
+    private fun arrivalTimePickerScreen(currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
+        object : Screen(carContext) {
+            override fun onGetTemplate(): Template {
+                val curHour = currentMinutes / 60
+                val listBuilder = ItemList.Builder()
+                (0..23).forEach { hour ->
+                    listBuilder.addItem(Row.Builder()
+                        .setTitle("${if (hour == curHour) "★ " else ""}%02d:xx".format(hour))
+                        .setOnClickListener {
+                            screenManager.push(arrivalMinutePickerScreen(hour, currentMinutes, onConfirm))
+                        }
+                        .build())
+                }
+                return ListTemplate.Builder()
+                    .setTitle("Arrival time — select hour")
+                    .setHeaderAction(Action.BACK)
+                    .setSingleList(listBuilder.build())
+                    .build()
+            }
+        }
+
+    private fun arrivalMinutePickerScreen(hour: Int, currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
+        object : Screen(carContext) {
+            override fun onGetTemplate(): Template {
+                val listBuilder = ItemList.Builder()
+                listOf(0, 30).forEach { mins ->
+                    val total = hour * 60 + mins
+                    listBuilder.addItem(Row.Builder()
+                        .setTitle("${if (total == currentMinutes) "★ " else ""}%02d:%02d".format(hour, mins))
+                        .setOnClickListener {
+                            onConfirm(total)
+                            screenManager.pop()
+                            screenManager.pop()
+                        }
+                        .build())
+                }
+                return ListTemplate.Builder()
+                    .setTitle("Arrival time — %02d:xx, select minutes".format(hour))
+                    .setHeaderAction(Action.BACK)
+                    .setSingleList(listBuilder.build())
+                    .build()
+            }
+        }
 
     private fun stayTimePickerScreen(currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
         object : Screen(carContext) {
@@ -327,6 +383,16 @@ class StopDetailScreen(
                             .setOnClickListener {
                                 screenManager.push(stayTimePickerScreen(stay) { value ->
                                     saveStop(stop.copy(stayMinutes = value))
+                                })
+                            }
+                            .build()
+                    )
+                    .addItem(
+                        Row.Builder()
+                            .setTitle("Arrival time (currently %02d:%02d)".format(stop.arrivalTimeMinutes / 60, stop.arrivalTimeMinutes % 60))
+                            .setOnClickListener {
+                                screenManager.push(arrivalTimePickerScreen(stop.arrivalTimeMinutes) { value ->
+                                    saveStop(stop.copy(arrivalTimeMinutes = value))
                                 })
                             }
                             .build()

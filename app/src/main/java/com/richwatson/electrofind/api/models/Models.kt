@@ -103,6 +103,12 @@ data class ChargingLocation(
     val chargingTimeRateMajor: Double? get() = timeRateForType("TimeRate")
     val parkingTimeRateMajor: Double? get() = timeRateForType("ParkingTimeRate")
 
+    val gracePeriodMinutes: Double get() = evses.edges
+        .flatMap { it.node.connectors.edges }
+        .flatMap { it.node.priceComponents }
+        .firstOrNull { it.type == "GracePeriod" }
+        ?.unitAmount?.toDouble() ?: 0.0
+
     val maxKilowatts: Double? get() {
         return evses.edges
             .flatMap { it.node.connectors.edges }

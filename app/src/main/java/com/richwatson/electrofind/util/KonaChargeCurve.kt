@@ -169,12 +169,17 @@ object KonaChargeCurve {
         connectionFee: Double = 0.0,
         chargingRatePerMin: Double = 0.0,
         parkingRatePerMin: Double = 0.0,
-        stayMinutes: Double = result.chargeMinutes
+        stayMinutes: Double = result.chargeMinutes,
+        gracePeriodMinutes: Double = 0.0
     ): Double {
-        val idleMinutes = (stayMinutes - result.chargeMinutes).coerceAtLeast(0.0)
+        val chargeMin = result.chargeMinutes
+        val idleMin = (stayMinutes - chargeMin).coerceAtLeast(0.0)
+        val billableChargeMin = (chargeMin - gracePeriodMinutes).coerceAtLeast(0.0)
+        val remainingGrace = (gracePeriodMinutes - chargeMin).coerceAtLeast(0.0)
+        val billableIdleMin = (idleMin - remainingGrace).coerceAtLeast(0.0)
         return pricePerKwh * result.billedEnergyKwh +
                 connectionFee +
-                chargingRatePerMin * result.chargeMinutes +
-                parkingRatePerMin * idleMinutes
+                chargingRatePerMin * billableChargeMin +
+                parkingRatePerMin * billableIdleMin
     }
 }

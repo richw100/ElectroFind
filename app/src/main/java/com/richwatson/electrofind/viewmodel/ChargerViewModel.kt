@@ -477,6 +477,20 @@ class ChargerViewModel(
         }
     }
 
+    fun refreshCharger(pk: Long) {
+        viewModelScope.launch {
+            val fresh = repository.refreshChargersByPks(setOf(pk))
+            if (fresh.isNotEmpty()) {
+                val freshByPk = fresh.associateBy { it.pk }
+                _state.update { s -> s.copy(
+                    chargers = s.chargers.map { freshByPk[it.pk] ?: it },
+                    favouriteChargers = s.favouriteChargers.map { freshByPk[it.pk] ?: it },
+                    routeChargers = s.routeChargers + freshByPk
+                ) }
+            }
+        }
+    }
+
     fun refreshRouteChargers() {
         val pks = _state.value.trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet()
         if (pks.isEmpty()) return
@@ -626,9 +640,9 @@ class ChargerViewModel(
         _state.update { it.copy(trips = updated) }
     }
 
-    fun updateRouteStop(stopId: String, arrivalSoc: Int, departureSoc: Int, stayMinutes: Int) {
+    fun updateRouteStop(stopId: String, arrivalSoc: Int, departureSoc: Int, stayMinutes: Int, arrivalTimeMinutes: Int = 720) {
         val updated = updateStopInTrips(stopId) { stop ->
-            stop.copy(arrivalSocPercent = arrivalSoc, departureSocPercent = departureSoc, stayMinutes = stayMinutes)
+            stop.copy(arrivalSocPercent = arrivalSoc, departureSocPercent = departureSoc, stayMinutes = stayMinutes, arrivalTimeMinutes = arrivalTimeMinutes)
         }
         saveTrips(updated)
         _state.update { it.copy(trips = updated) }
@@ -845,6 +859,7 @@ private fun ChargingLocation.simCost(state: SearchState, stayMinutes: Double?): 
         connectionFee = connectionFeeMajor ?: 0.0,
         chargingRatePerMin = chargingTimeRateMajor ?: 0.0,
         parkingRatePerMin = parkingTimeRateMajor ?: 0.0,
-        stayMinutes = stayMinutes ?: result.chargeMinutes
+        stayMinutes = stayMinutes ?: result.chargeMinutes,
+        gracePeriodMinutes = gracePeriodMinutes
     )
 }
