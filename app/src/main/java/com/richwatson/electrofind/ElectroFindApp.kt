@@ -15,6 +15,7 @@ class ElectroFindApp : Application() {
     lateinit var repository: ChargerRepository
     lateinit var appPreferences: AppPreferences
     lateinit var carProfileRepository: CarProfileRepository
+    val database: AppDatabase get() = AppDatabase.getInstance(this)
 
     override fun onCreate() {
         super.onCreate()

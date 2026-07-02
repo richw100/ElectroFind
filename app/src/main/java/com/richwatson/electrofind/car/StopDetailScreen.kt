@@ -13,26 +13,29 @@ import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.core.graphics.drawable.IconCompat
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.ElectroFindApp
 import com.richwatson.electrofind.R
 import com.richwatson.electrofind.api.models.ChargingLocation
-import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.preferences.AppPreferences
-import com.richwatson.electrofind.repository.ChargerRepository
 import com.richwatson.electrofind.api.models.timeAgo
-import com.richwatson.electrofind.util.KonaChargeCurve
+import com.richwatson.electrofind.db.CachedChargerEntity
+import com.richwatson.electrofind.work.RefreshChargersWorker
+import androidx.car.app.constraints.ConstraintManager
 import android.util.Log
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import kotlin.math.roundToInt
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class StopDetailScreen(
     carContext: CarContext,
     private var stop: RouteStop,
@@ -41,37 +44,70 @@ class StopDetailScreen(
 
     private val app = carContext.applicationContext as ElectroFindApp
     private val prefs = AppPreferences(carContext.applicationContext)
-    private val repo: ChargerRepository = app.repository
+    private val dao = app.database.chargerDao()
     private val gson = Gson()
 
     private var chargerMap: Map<Long, ChargingLocation> = initialChargerMap
     private var lastRefreshed: String? = null
+    private var chargerPage: Int = 0
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
 
+    private fun dlog(msg: String) = CarDebugLog.log(carContext, "[StopDetail] $msg")
+
     init {
+        dlog("init pks=${stop.chargerPks} activePk=${stop.activePk} initialMapSize=${initialChargerMap.size}")
+
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onCreate(owner: LifecycleOwner) = dlog("lifecycle onCreate")
+            override fun onStart(owner: LifecycleOwner) = dlog("lifecycle onStart")
+            override fun onResume(owner: LifecycleOwner) = dlog("lifecycle onResume")
+            override fun onPause(owner: LifecycleOwner) = dlog("lifecycle onPause")
+            override fun onStop(owner: LifecycleOwner) = dlog("lifecycle onStop")
+            override fun onDestroy(owner: LifecycleOwner) = dlog("lifecycle onDestroy")
+        })
+
+        // Kick off an immediate refresh via WorkManager — runs outside Car App lifecycle scope
+        // so it isn't blocked by driving UX restrictions
+        RefreshChargersWorker.enqueue(carContext, stop.chargerPks.toSet())
+
+        // Observe Room DB: when the Worker saves fresh data, chargerMap updates automatically.
+        // debounce collapses bursts of near-simultaneous emissions (e.g. concurrent upserts)
+        // into a single invalidate() — rapid consecutive template refreshes while driving
+        // can trip the host's UX-restriction throttling.
+        lifecycleScope.launch {
+            dao.observeByPks(stop.chargerPks).debounce(300).collect { entities ->
+                val fresh = entities.mapNotNull { entity ->
+                    try {
+                        gson.fromJson(entity.json, ChargingLocation::class.java)
+                            .copy(cachedAt = entity.cachedAt)
+                    } catch (_: Exception) { null }
+                }
+                dlog("db observe emit: entities=${entities.size} fresh=${fresh.size} pksBefore=${chargerMap.keys}")
+                if (fresh.isNotEmpty()) {
+                    chargerMap = chargerMap + fresh.associateBy { it.pk }
+                    lastRefreshed = LocalTime.now().format(timeFmt)
+                    dlog("db observe -> invalidate() chargerMapSize=${chargerMap.size}")
+                    invalidate()
+                }
+            }
+        }
+
+        // Re-enqueue every 60s so availability stays current while the screen is open
         lifecycleScope.launch {
             while (isActive) {
                 delay(60_000)
-                try {
-                    val fresh = stop.chargerPks.mapNotNull { pk ->
-                        repo.fetchChargingLocation(pk.toString())
-                    }
-                    if (fresh.isNotEmpty()) {
-                        chargerMap = chargerMap + fresh.associateBy { it.pk }
-                        lastRefreshed = LocalTime.now().format(timeFmt)
-                        invalidate()
-                    }
-                } catch (e: Exception) {
-                    Log.e("StopDetailScreen", "refresh error", e)
-                }
+                dlog("periodic 60s re-enqueue")
+                RefreshChargersWorker.enqueue(carContext, stop.chargerPks.toSet())
             }
         }
     }
 
     override fun onGetTemplate(): Template = try {
-        onGetTemplateInternal()
-    } catch (e: Exception) {
+        dlog("onGetTemplate() called")
+        onGetTemplateInternal().also { dlog("onGetTemplate() returning template OK") }
+    } catch (e: Throwable) {
         Log.e("StopDetailScreen", "onGetTemplate crash", e)
+        dlog("onGetTemplate CRASH: ${e::class.simpleName}: ${e.message}\n${e.stackTraceToString()}")
         MessageTemplate.Builder("Error: ${e.message}")
             .setTitle(stop.displayName(0))
             .setHeaderAction(Action.BACK)
@@ -85,7 +121,7 @@ class StopDetailScreen(
                 .setTitle(stop.displayName(0))
                 .setHeaderAction(Action.BACK)
                 .setLoading(true)
-                .build()
+                .build().also { dlog("onGetTemplateInternal: activeCharger missing, returning loading template") }
 
         val editIcon = CarIcon.Builder(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_edit)
@@ -94,71 +130,88 @@ class StopDetailScreen(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_navigate)
         ).build()
 
-        val listBuilder = ItemList.Builder()
-        stop.chargerPks.forEachIndexed { idx, pk ->
-            val charger = chargerMap[pk] ?: return@forEachIndexed
-            val prefix = if (idx == stop.activeIndex) "★ " else ""
-            val onSelect: (() -> Unit) = if (idx != stop.activeIndex) {
-                { saveStop(stop.copy(activeIndex = idx)) }
-            } else {
-                { screenManager.push(editMenuScreen()) }
-            }
-            listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, onSelect))
-        }
-
         val updatedSuffix = when {
             lastRefreshed != null -> " · Updated $lastRefreshed"
             activeCharger.cachedAt > 0L -> " · Data: ${timeAgo(activeCharger.cachedAt)}"
             else -> ""
         }
+        val editFab = Action.Builder()
+            .setIcon(editIcon)
+            .setBackgroundColor(CarColor.PRIMARY)
+            .setOnClickListener { screenManager.push(editMenuScreen()) }
+            .build()
+        val baseTitle = stop.displayName(stop.chargerPks.indexOf(stop.activePk)) + updatedSuffix
+
+        val maxItems = carContext.getCarService(ConstraintManager::class.java)
+            .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
+
+        // Active charger always first so it's always on page 0
+        val sortedPks = stop.chargerPks.sortedByDescending { if (it == stop.activePk) 1 else 0 }
+
+        dlog("onGetTemplateInternal: maxItems=$maxItems sortedPks=${sortedPks.size} chargerMapKeys=${chargerMap.keys} chargerPage=$chargerPage branch=${if (sortedPks.size <= maxItems) "single" else "multi"}")
+
+        if (sortedPks.size <= maxItems) {
+            val listBuilder = ItemList.Builder()
+            sortedPks.forEach { pk ->
+                val charger = chargerMap[pk] ?: return@forEach
+                val prefix = if (pk == stop.activePk) "★ " else ""
+                val onSelect: (() -> Unit) = if (pk != stop.activePk) {
+                    { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
+                } else { { screenManager.push(editMenuScreen()) } }
+                listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, onSelect))
+            }
+            val builtList = listBuilder.build()
+            dlog("onGetTemplateInternal: single-page returning rowCount=${builtList.items.size} title=\"$baseTitle\"")
+            return ListTemplate.Builder()
+                .setTitle(baseTitle)
+                .setHeaderAction(Action.BACK)
+                .setSingleList(builtList)
+                .addAction(editFab)
+                .build()
+        }
+
+        // Multi-page: reserve 2 slots for ← Previous / Next → rows
+        val chargersPerPage = maxOf(1, maxItems - 2)
+        val totalPages = (sortedPks.size + chargersPerPage - 1) / chargersPerPage
+        val page = chargerPage.coerceIn(0, totalPages - 1)
+        if (chargerPage != page) chargerPage = page
+        val pageChargers = sortedPks.drop(page * chargersPerPage).take(chargersPerPage)
+        dlog("onGetTemplateInternal: multi-page chargersPerPage=$chargersPerPage totalPages=$totalPages page=$page pageChargers=${pageChargers.size}")
+
+        val listBuilder = ItemList.Builder()
+        if (page > 0) {
+            listBuilder.addItem(Row.Builder()
+                .setTitle("← Previous")
+                .setOnClickListener { chargerPage--; invalidate() }
+                .build())
+        }
+        pageChargers.forEach { pk ->
+            val charger = chargerMap[pk] ?: return@forEach
+            val prefix = if (pk == stop.activePk) "★ " else ""
+            val onSelect: (() -> Unit) = if (pk != stop.activePk) {
+                { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
+            } else { { screenManager.push(editMenuScreen()) } }
+            listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, onSelect))
+        }
+        if (page < totalPages - 1) {
+            listBuilder.addItem(Row.Builder()
+                .setTitle("Next →")
+                .setOnClickListener { chargerPage++; invalidate() }
+                .build())
+        }
+
+        val builtList = listBuilder.build()
+        dlog("onGetTemplateInternal: multi-page returning rowCount=${builtList.items.size} title=\"$baseTitle · ${page + 1}/$totalPages\"")
         return ListTemplate.Builder()
-            .setTitle(stop.displayName(stop.chargerPks.indexOf(stop.activePk)) + updatedSuffix)
+            .setTitle("$baseTitle · ${page + 1}/$totalPages")
             .setHeaderAction(Action.BACK)
-            .setSingleList(listBuilder.build())
-            .addAction(
-                Action.Builder()
-                    .setIcon(editIcon)
-                    .setBackgroundColor(CarColor.PRIMARY)
-                    .setOnClickListener { screenManager.push(editMenuScreen()) }
-                    .build()
-            )
+            .setSingleList(builtList)
+            .addAction(editFab)
             .build()
     }
 
     private fun chargerRow(charger: ChargingLocation, prefix: String, stop: RouteStop, navigateIcon: CarIcon, onSelect: () -> Unit): Row {
-        val availByKw = charger.availabilityByKw
-
-        val line1 = charger.connectorPriceSummaries
-            .mapNotNull { s -> s.kilowatts?.toInt()?.let { kw -> kw to s } }
-            .distinctBy { it.first }
-            .sortedByDescending { it.first }
-            .take(3)
-            .joinToString(" | ") { (kw, s) ->
-                val (avail, inUse, fault) = availByKw[kw] ?: Triple(0, 0, 0)
-                val mins = KonaChargeCurve.simulate(
-                    stop.arrivalSocPercent.toFloat(),
-                    stop.departureSocPercent.toFloat(),
-                    s.kilowatts!!, null,
-                    profile = CarProfile.KONA_LR
-                ).chargeMinutes
-                val avParts = listOfNotNull(
-                    if (avail > 0) "${avail}a" else null,
-                    if (inUse > 0) "${inUse}u" else null,
-                    if (fault > 0) "${fault}x" else null
-                ).joinToString("")
-                "${kw}kW${if (avParts.isNotEmpty()) " $avParts" else ""} ${formatMins(mins)}"
-            }
-
-        val connectorTypes = charger.connectorPriceSummaries
-            .map { abbreviateConnectorType(it.type) }
-            .distinct()
-            .filter { it.isNotEmpty() }
-
-        val costText = buildCostText(charger, stop)
-        val line2Parts = mutableListOf<String>()
-        if (costText.isNotEmpty()) line2Parts.add(costText)
-        if (connectorTypes.isNotEmpty()) line2Parts.add(connectorTypes.joinToString("/"))
-        val line2 = line2Parts.joinToString(" · ")
+        val (line1, line2) = charger.chargerDetailLines(stop)
 
         val lat = charger.coordinates.latitude
         val lng = charger.coordinates.longitude
@@ -180,55 +233,6 @@ class StopDetailScreen(
                     .build()
             )
             .build()
-    }
-
-    private fun formatMins(minutes: Double): String {
-        val m = minutes.roundToInt()
-        return if (m < 60) "~${m}m" else "~${m / 60}h${"%02d".format(m % 60)}m"
-    }
-
-    private fun abbreviateConnectorType(type: String): String = when {
-        type.contains("COMBO", ignoreCase = true) || type.contains("CCS", ignoreCase = true) -> "CCS"
-        type.contains("CHADEMO", ignoreCase = true) -> "CHAdeMO"
-        type.contains("TYPE_2", ignoreCase = true) || type.contains("TYPE 2", ignoreCase = true) -> "T2"
-        type.contains("TYPE_1", ignoreCase = true) || type.contains("TYPE 1", ignoreCase = true) -> "T1"
-        type.contains("TESLA", ignoreCase = true) || type.contains("NACS", ignoreCase = true) -> "Tesla"
-        type.isBlank() -> ""
-        else -> type.take(6)
-    }
-
-    private fun buildCostText(charger: ChargingLocation, stop: RouteStop): String {
-        val kw = charger.maxKilowatts ?: return ""
-        val price = charger.pricePerKwh ?: return ""
-        val connectionFee = charger.connectionFeeMajor ?: 0.0
-        val chargingRate = charger.chargingTimeRateMajor ?: 0.0
-        val parkingRate = charger.parkingTimeRateMajor ?: 0.0
-        val gracePeriod = charger.gracePeriodMinutes
-
-        val optResult = KonaChargeCurve.simulate(
-            stop.arrivalSocPercent.toFloat(),
-            stop.departureSocPercent.toFloat(),
-            kw,
-            stayMinutes = null,
-            profile = CarProfile.KONA_LR
-        )
-        val optCost = KonaChargeCurve.totalCost(optResult, price, connectionFee, chargingRate, parkingRate, gracePeriodMinutes = gracePeriod)
-
-        val stayResult = KonaChargeCurve.simulate(
-            stop.arrivalSocPercent.toFloat(),
-            stop.departureSocPercent.toFloat(),
-            kw,
-            stayMinutes = stop.stayMinutes.toDouble(),
-            profile = CarProfile.KONA_LR
-        )
-        val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble(), gracePeriod)
-
-        return buildString {
-            append("Opt £${"%.2f".format(optCost)} Stay £${"%.2f".format(stayCost)}")
-            if (connectionFee > 0) append(" +£${"%.2f".format(connectionFee)}")
-            if (chargingRate > 0) append(" +£${"%.2f".format(chargingRate)}/m")
-            if (parkingRate > 0) append(" +£${"%.2f".format(parkingRate)}/m park")
-        }
     }
 
     private fun paramPickerScreen(
@@ -408,6 +412,7 @@ class StopDetailScreen(
     }
 
     private fun saveStop(updated: RouteStop) {
+        chargerPage = 0
         stop = updated
         val raw = prefs.rawRoutePlan
         val type = object : TypeToken<List<RouteStop>>() {}.type
