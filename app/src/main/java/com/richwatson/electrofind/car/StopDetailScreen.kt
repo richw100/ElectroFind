@@ -51,6 +51,9 @@ class StopDetailScreen(
     private var lastRefreshed: String? = null
     private var chargerPage: Int = 0
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
+    // Room's table-level invalidation re-emits observeByPks() for ANY write to
+    // cached_chargers, not just ones affecting our PKs — skip re-parsing JSON that hasn't changed.
+    private val parsedCache = mutableMapOf<Long, Pair<String, ChargingLocation>>()
 
     private fun dlog(msg: String) = CarDebugLog.log(carContext, "[StopDetail] $msg")
 
@@ -77,10 +80,16 @@ class StopDetailScreen(
         lifecycleScope.launch {
             dao.observeByPks(stop.chargerPks).debounce(300).collect { entities ->
                 val fresh = entities.mapNotNull { entity ->
-                    try {
-                        gson.fromJson(entity.json, ChargingLocation::class.java)
-                            .copy(cachedAt = entity.cachedAt)
-                    } catch (_: Exception) { null }
+                    val cached = parsedCache[entity.pk]
+                    if (cached != null && cached.first == entity.json) {
+                        cached.second.copy(cachedAt = entity.cachedAt)
+                    } else {
+                        try {
+                            val parsed = gson.fromJson(entity.json, ChargingLocation::class.java)
+                            parsedCache[entity.pk] = entity.json to parsed
+                            parsed.copy(cachedAt = entity.cachedAt)
+                        } catch (_: Exception) { null }
+                    }
                 }
                 dlog("db observe emit: entities=${entities.size} fresh=${fresh.size} pksBefore=${chargerMap.keys}")
                 if (fresh.isNotEmpty()) {

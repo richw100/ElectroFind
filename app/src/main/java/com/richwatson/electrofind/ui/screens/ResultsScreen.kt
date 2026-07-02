@@ -212,7 +212,7 @@ internal fun TripPickerDialog(
                 androidx.compose.foundation.lazy.LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(trips) { trip ->
+                    items(trips, key = { it.id }) { trip ->
                         FilterChip(
                             selected = trip.id == selectedTripId,
                             onClick = { selectedTripId = trip.id },

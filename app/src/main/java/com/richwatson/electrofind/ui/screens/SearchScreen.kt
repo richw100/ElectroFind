@@ -136,7 +136,7 @@ fun SearchScreen(
                 if (suggestionsExpanded && suggestions.isNotEmpty()) {
                     Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(suggestions) { suggestion ->
+                            items(suggestions, key = { it }) { suggestion ->
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -168,7 +168,7 @@ fun SearchScreen(
                 } else if (fieldFocused && searchText.isEmpty() && state.searchHistory.isNotEmpty()) {
                     Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(state.searchHistory) { entry ->
+                            items(state.searchHistory, key = { it }) { entry ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically

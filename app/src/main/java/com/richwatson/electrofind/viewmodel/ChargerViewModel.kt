@@ -399,14 +399,14 @@ class ChargerViewModel(
 
     fun addCustomCharger(c: CustomCharger) {
         val new = c.copy(id = -System.currentTimeMillis())
-        val current = loadRawCustomChargers().toMutableList()
+        val current = _state.value.rawCustomChargers.toMutableList()
         current.add(new)
         saveRawCustomChargers(current)
         _state.update { it.copy(rawCustomChargers = current, customChargers = current.map { ch -> ch.toChargingLocation() }) }
     }
 
     fun updateCustomCharger(c: CustomCharger) {
-        val current = loadRawCustomChargers().toMutableList()
+        val current = _state.value.rawCustomChargers.toMutableList()
         val idx = current.indexOfFirst { it.id == c.id }
         if (idx >= 0) current[idx] = c else current.add(c)
         saveRawCustomChargers(current)
@@ -414,7 +414,7 @@ class ChargerViewModel(
     }
 
     fun deleteCustomCharger(id: Long) {
-        val current = loadRawCustomChargers().filter { it.id != id }
+        val current = _state.value.rawCustomChargers.filter { it.id != id }
         saveRawCustomChargers(current)
         _state.update { it.copy(rawCustomChargers = current, customChargers = current.map { it.toChargingLocation() }) }
     }

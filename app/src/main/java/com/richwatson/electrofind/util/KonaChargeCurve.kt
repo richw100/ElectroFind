@@ -127,12 +127,46 @@ object KonaChargeCurve {
         val reachedTarget: Boolean
     )
 
+    private data class SimKey(
+        val startSoc: Float,
+        val targetSoc: Float,
+        val chargerMaxKw: Double,
+        val stayMinutes: Double?,
+        val profileId: String
+    )
+
+    // simulate() is a pure function of its inputs but runs a ~600-iteration loop; it's
+    // called repeatedly with identical inputs across car + phone UI screens (charge cost
+    // estimates, map badges/popups) with no caller-side memoization, so cache it here once.
+    // Bounded LRU: real cardinality is small (picker-constrained SoC/stay values, a handful
+    // of connector speeds), so this comfortably covers a session with headroom.
+    private const val SIM_CACHE_MAX = 2000
+    private val simCache = object : LinkedHashMap<SimKey, SimResult>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<SimKey, SimResult>?) = size > SIM_CACHE_MAX
+    }
+
     fun simulate(
         startSoc: Float,
         targetSoc: Float,
         chargerMaxKw: Double,
         stayMinutes: Double? = null,
         profile: CarProfile = CarProfile.KONA_LR
+    ): SimResult {
+        // Key on profile.id, not the CarProfile object itself — its equals() would walk
+        // a 101-entry point list on every cache lookup, defeating the point of caching.
+        val key = SimKey(startSoc, targetSoc, chargerMaxKw, stayMinutes, profile.id)
+        synchronized(simCache) { simCache[key] }?.let { return it }
+        val result = computeSimulate(startSoc, targetSoc, chargerMaxKw, stayMinutes, profile)
+        synchronized(simCache) { simCache[key] = result }
+        return result
+    }
+
+    private fun computeSimulate(
+        startSoc: Float,
+        targetSoc: Float,
+        chargerMaxKw: Double,
+        stayMinutes: Double?,
+        profile: CarProfile
     ): SimResult {
         if (chargerMaxKw <= 0.0 || startSoc >= targetSoc) {
             return SimResult(startSoc, 0.0, 0.0, 0.0, startSoc >= targetSoc)

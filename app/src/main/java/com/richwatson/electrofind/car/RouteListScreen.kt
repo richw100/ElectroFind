@@ -40,6 +40,9 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
     private var trips: List<Trip> = emptyList()
     private var chargerMap: Map<Long, ChargingLocation> = emptyMap()
     private var isLoading = true
+    // Room's table-level invalidation re-emits observeByPks() for ANY write to
+    // cached_chargers, not just ones affecting our PKs — skip re-parsing JSON that hasn't changed.
+    private val parsedCache = mutableMapOf<Long, Pair<String, ChargingLocation>>()
 
     init {
         loadData()
@@ -69,10 +72,16 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             if (allPks.isEmpty()) return@launch
             app.database.chargerDao().observeByPks(allPks).debounce(300).collect { entities ->
                 val fresh = entities.mapNotNull { entity ->
-                    try {
-                        gson.fromJson(entity.json, ChargingLocation::class.java)
-                            .copy(cachedAt = entity.cachedAt)
-                    } catch (_: Exception) { null }
+                    val cached = parsedCache[entity.pk]
+                    if (cached != null && cached.first == entity.json) {
+                        cached.second.copy(cachedAt = entity.cachedAt)
+                    } else {
+                        try {
+                            val parsed = gson.fromJson(entity.json, ChargingLocation::class.java)
+                            parsedCache[entity.pk] = entity.json to parsed
+                            parsed.copy(cachedAt = entity.cachedAt)
+                        } catch (_: Exception) { null }
+                    }
                 }
                 if (fresh.isNotEmpty()) {
                     chargerMap = chargerMap + fresh.associateBy { it.pk }

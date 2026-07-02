@@ -297,7 +297,7 @@ fun BrowseMapScreen(
                     if (suggestionsExpanded && suggestions.isNotEmpty()) {
                         HorizontalDivider()
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(suggestions) { suggestion ->
+                            items(suggestions, key = { it }) { suggestion ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
@@ -346,7 +346,7 @@ fun BrowseMapScreen(
                     } else if (fieldFocused && searchText.isEmpty() && state.searchHistory.isNotEmpty()) {
                         HorizontalDivider()
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(state.searchHistory) { entry ->
+                            items(state.searchHistory, key = { it }) { entry ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()

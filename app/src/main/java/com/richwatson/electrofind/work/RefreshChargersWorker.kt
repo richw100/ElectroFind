@@ -27,11 +27,15 @@ class RefreshChargersWorker(ctx: Context, params: WorkerParameters) : CoroutineW
 
         fun enqueue(context: Context, pks: Set<Long>) {
             if (pks.isEmpty()) return
+            // Name scoped to the PK set (not a single global name) so refreshing one
+            // stop's chargers while another stop's refresh is still in flight/retrying
+            // isn't silently dropped by KEEP.
+            val name = "refresh-chargers-" + pks.sorted().hashCode()
             val req = OneTimeWorkRequestBuilder<RefreshChargersWorker>()
                 .setInputData(workDataOf(KEY_PKS to pks.toLongArray()))
                 .build()
             WorkManager.getInstance(context)
-                .enqueueUniqueWork("refresh-chargers", ExistingWorkPolicy.KEEP, req)
+                .enqueueUniqueWork(name, ExistingWorkPolicy.KEEP, req)
         }
     }
 }

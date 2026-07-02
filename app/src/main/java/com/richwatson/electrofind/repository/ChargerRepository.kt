@@ -46,6 +46,24 @@ class ChargerRepository(
 
     private val defaultSocketGroups = listOf("CCS", "TYPE_2")
 
+    // Outlives any single caller's coroutineScope so one caller cancelling doesn't
+    // cancel a fetch other concurrent callers (car UI + phone UI share this repository) are awaiting.
+    private val repoScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    private val inFlightFetches = java.util.concurrent.ConcurrentHashMap<Long, kotlinx.coroutines.Deferred<ChargingLocation?>>()
+
+    // Dedupes concurrent fetches of the same charger PK from different call sites
+    // (e.g. RouteListScreen + ChargerViewModel loading overlapping stops at once).
+    private fun fetchChargingLocationShared(pk: Long): kotlinx.coroutines.Deferred<ChargingLocation?> =
+        inFlightFetches.computeIfAbsent(pk) { key ->
+            repoScope.async {
+                try {
+                    fetchChargingLocation(key.toString())
+                } finally {
+                    inFlightFetches.remove(key)
+                }
+            }
+        }
+
     private val nominatimClient = OkHttpClient.Builder()
         .callTimeout(5, TimeUnit.SECONDS)
         .build()
@@ -135,20 +153,46 @@ class ChargerRepository(
         val sentCount = AtomicInteger(0)
         val cachedCount = AtomicInteger(0)
 
+        // DB writes are decoupled from UI emission (send() above stays immediate for
+        // incremental-results UX) and micro-batched here so a burst of search results
+        // doesn't fire one Room transaction/Flow re-emission per charger.
+        val entityChannel = Channel<CachedChargerEntity>(Channel.UNLIMITED)
+
         coroutineScope {
+            val batcher = launch(Dispatchers.IO) {
+                val batch = mutableListOf<CachedChargerEntity>()
+                try {
+                    while (true) {
+                        batch.add(entityChannel.receive())
+                        val deadline = System.currentTimeMillis() + 250L
+                        while (batch.size < 25) {
+                            val remaining = deadline - System.currentTimeMillis()
+                            if (remaining <= 0) break
+                            val next = kotlinx.coroutines.withTimeoutOrNull(remaining) { entityChannel.receive() } ?: break
+                            batch.add(next)
+                        }
+                        dao.upsertAll(batch.toList())
+                        batch.clear()
+                    }
+                } catch (e: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
+                    // entityChannel closed and drained
+                }
+                if (batch.isNotEmpty()) dao.upsertAll(batch)
+            }
+
             // 10 workers start immediately — they pick up PKs as tiles feed them in
             val workers = List(10) {
                 launch(Dispatchers.IO) {
                     for (pk in pkChannel) {
                         try {
-                            val charger = withTimeout(8_000L) { fetchChargingLocation(pk.toString()) }
+                            val charger = withTimeout(8_000L) { fetchChargingLocationShared(pk).await() }
                             val n = done.incrementAndGet()
                             val t = totalQueued.get()
                             if (n == 1 || n % 5 == 0) {
                                 onStatus("${sentCount.get()} found, checking $n/$t…", if (t > 0) n.toFloat() / t else 0f)
                             }
                             if (charger == null) continue
-                            dao.upsert(CachedChargerEntity(
+                            entityChannel.send(CachedChargerEntity(
                                 pk = charger.pk,
                                 lat = charger.coordinates.latitude,
                                 lng = charger.coordinates.longitude,
@@ -232,6 +276,8 @@ class ChargerRepository(
             }
 
             workers.forEach { it.join() }
+            entityChannel.close()
+            batcher.join()
         }
 
         Log.d(TAG, "SUMMARY lat=$lat lng=$lng | sent=${sentCount.get()} cached=${cachedCount.get()} total_api=${done.get()}")
@@ -350,24 +396,30 @@ class ChargerRepository(
             }
         }
         if (missing.isNotEmpty()) {
-            coroutineScope {
+            val now = System.currentTimeMillis()
+            val fetched = coroutineScope {
                 missing.map { pk ->
                     async {
                         try {
-                            val charger = fetchChargingLocation(pk.toString()) ?: return@async null
-                            val now = System.currentTimeMillis()
-                            dao.upsert(CachedChargerEntity(
-                                pk = charger.pk,
-                                lat = charger.coordinates.latitude,
-                                lng = charger.coordinates.longitude,
-                                cachedAt = now,
-                                json = gson.toJson(charger)
-                            ))
-                            charger.copy(cachedAt = now)
+                            fetchChargingLocationShared(pk).await()?.copy(cachedAt = now)
                         } catch (e: Exception) { null }
                     }
-                }.awaitAll().filterNotNull().forEach { result.add(it) }
+                }.awaitAll().filterNotNull()
             }
+            // Single batched transaction so ChargerDao.observeByPks() Flow observers
+            // (e.g. Android Auto screens) emit once for this load, not once per charger.
+            if (fetched.isNotEmpty()) {
+                dao.upsertAll(fetched.map { charger ->
+                    CachedChargerEntity(
+                        pk = charger.pk,
+                        lat = charger.coordinates.latitude,
+                        lng = charger.coordinates.longitude,
+                        cachedAt = now,
+                        json = gson.toJson(charger)
+                    )
+                })
+            }
+            result.addAll(fetched)
         }
         result
     }
@@ -379,8 +431,7 @@ class ChargerRepository(
             pks.map { pk ->
                 async {
                     try {
-                        val charger = fetchChargingLocation(pk.toString()) ?: return@async null
-                        charger.copy(cachedAt = now)
+                        fetchChargingLocationShared(pk).await()?.copy(cachedAt = now)
                     } catch (e: Exception) { null }
                 }
             }.awaitAll().filterNotNull()
