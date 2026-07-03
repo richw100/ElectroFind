@@ -135,12 +135,16 @@ class ChargerViewModel(
             )
         }
         loadFavouriteChargers(appPreferences.favouritePks)
+        // Must populate customChargers before the loadRouteChargers() call below — it resolves
+        // custom-charger pks from state.customChargers instead of the network (they don't exist
+        // in Electroverse's backend), so loading trips/route chargers first left them permanently
+        // stuck on "Loading charger data…" after every cold start.
+        val raw = loadRawCustomChargers()
+        _state.update { it.copy(rawCustomChargers = raw, customChargers = raw.map { c -> c.toChargingLocation() }) }
         val trips = loadTripsFromPrefs()
         val activeTripId = trips.firstOrNull()?.id
         _state.update { it.copy(trips = trips, activeTripId = activeTripId) }
         loadRouteChargers(trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet())
-        val raw = loadRawCustomChargers()
-        _state.update { it.copy(rawCustomChargers = raw, customChargers = raw.map { c -> c.toChargingLocation() }) }
     }
 
     private fun applyFiltersAndSort(source: List<ChargingLocation>, s: SearchState): List<ChargingLocation> {
@@ -475,13 +479,23 @@ class ChargerViewModel(
 
     private fun loadRouteChargers(pks: Set<Long>) {
         if (pks.isEmpty()) return
+        // Custom chargers aren't in Electroverse's backend, so they can never be resolved via
+        // repository.getChargersByPks() (Room cache miss -> network fetch -> always fails/null).
+        // Serve them straight from local state instead of sending their pks to the network.
+        val customByPk = _state.value.customChargers.associateBy { it.pk }
+        val customMatches = pks.mapNotNull { customByPk[it] }.associateBy { it.pk }
+        val remotePks = pks - customByPk.keys
+        if (customMatches.isNotEmpty()) {
+            _state.update { s -> s.copy(routeChargers = s.routeChargers + customMatches) }
+        }
+        if (remotePks.isEmpty()) return
         viewModelScope.launch {
             // getChargersByPks() can return chargers straight from the Room cache without
             // hitting the network, so it must NOT claim routeChargersRefreshedAt = now — that
             // banner should only reflect an actual refresh (see refreshRouteChargers()),
             // otherwise it can say "Updated just now" while every charger still shows the
             // stale-data "!" warning because the underlying cache entries are genuinely old.
-            val chargers = repository.getChargersByPks(pks)
+            val chargers = repository.getChargersByPks(remotePks)
             _state.update { s -> s.copy(
                 routeChargers = s.routeChargers + chargers.associateBy { it.pk }
             ) }
@@ -489,6 +503,11 @@ class ChargerViewModel(
     }
 
     fun refreshCharger(pk: Long) {
+        val custom = _state.value.customChargers.find { it.pk == pk }
+        if (custom != null) {
+            _state.update { s -> s.copy(routeChargers = s.routeChargers + (pk to custom)) }
+            return
+        }
         viewModelScope.launch {
             val fresh = repository.refreshChargersByPks(setOf(pk))
             if (fresh.isNotEmpty()) {
@@ -503,7 +522,15 @@ class ChargerViewModel(
     }
 
     fun refreshRouteChargers() {
-        val pks = _state.value.trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet()
+        val allPks = _state.value.trips.flatMap { t -> t.stops.flatMap { it.chargerPks } }.toSet()
+        if (allPks.isEmpty()) return
+        // Custom chargers have no server-side state to refresh — just keep them in sync locally.
+        val customByPk = _state.value.customChargers.associateBy { it.pk }
+        val customMatches = allPks.mapNotNull { customByPk[it] }.associateBy { it.pk }
+        val pks = allPks - customByPk.keys
+        if (customMatches.isNotEmpty()) {
+            _state.update { s -> s.copy(routeChargers = s.routeChargers + customMatches) }
+        }
         if (pks.isEmpty()) return
         viewModelScope.launch {
             val fresh = repository.refreshChargersByPks(pks)
@@ -721,7 +748,7 @@ class ChargerViewModel(
             if (parts.size == 3) try {
                 SearchHistoryEntry(parts[0], parts[1].toDouble(), parts[2].toDouble())
             } catch (e: Exception) { null } else null
-        }
+        }.distinctBy { it.label.lowercase() }
     }
 
     private fun addToHistory(label: String, lat: Double, lng: Double) {

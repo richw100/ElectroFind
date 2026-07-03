@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -136,7 +137,7 @@ fun SearchScreen(
                 if (suggestionsExpanded && suggestions.isNotEmpty()) {
                     Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(suggestions, key = { it }) { suggestion ->
+                            itemsIndexed(suggestions, key = { index, s -> "${index}_${s.displayName}_${s.lat}_${s.lng}" }) { _, suggestion ->
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -168,7 +169,7 @@ fun SearchScreen(
                 } else if (fieldFocused && searchText.isEmpty() && state.searchHistory.isNotEmpty()) {
                     Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(state.searchHistory, key = { it }) { entry ->
+                            itemsIndexed(state.searchHistory, key = { index, entry -> "${index}_${entry.label}" }) { _, entry ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically

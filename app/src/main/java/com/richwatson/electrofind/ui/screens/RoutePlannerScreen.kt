@@ -92,6 +92,9 @@ import java.util.Locale
 
 private data class ConfirmPendingAction(val title: String, val body: String, val onConfirm: () -> Unit)
 
+private fun formatDurationMinutes(mins: Int): String =
+    if (mins < 60) "$mins min" else "${mins / 60}h ${"%02d".format(mins % 60)}min"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -> Unit = {}) {
@@ -729,11 +732,11 @@ private fun RouteStopCard(
                             val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
                             val optMins = optResult.chargeMinutes.toInt()
                             val optSoc = optResult.endSocPercent.toInt()
-                            val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
+                            val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
                             val staySoc = stayResult.endSocPercent.toInt()
                             val fmt: (Double) -> String = { c -> if (pg.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
                             Text("⚡ Optimal: $optLabel  ·  ${fmt(optCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            Text("🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("🕐 In ${formatDurationMinutes(session.stayMinutes)} → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -752,7 +755,7 @@ private fun RouteStopCard(
             // SoC / time summary + edit
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    "Arrive ${stop.arrivalSocPercent}% → Depart ${stop.departureSocPercent}%  ·  ${stop.stayMinutes} min",
+                    "Arrive ${stop.arrivalSocPercent}% → Depart ${stop.departureSocPercent}%  ·  ${formatDurationMinutes(stop.stayMinutes)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
@@ -854,8 +857,7 @@ private fun RouteStopEditDialog(
                 Slider(value = departure, onValueChange = { departure = it }, valueRange = 0f..100f, steps = 99)
 
                 val stayMins = stay.toInt() * 5
-                val stayLabel = if (stayMins < 60) "$stayMins min" else "${stayMins / 60}h ${"%02d".format(stayMins % 60)}min"
-                Text("Stay time: $stayLabel", style = MaterialTheme.typography.bodySmall)
+                Text("Stay time: ${formatDurationMinutes(stayMins)}", style = MaterialTheme.typography.bodySmall)
                 Slider(value = stay, onValueChange = { stay = it }, valueRange = 0f..144f, steps = 143)
 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
