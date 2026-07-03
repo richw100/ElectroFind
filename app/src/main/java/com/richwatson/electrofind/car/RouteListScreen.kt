@@ -246,7 +246,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             val rowBuilder = Row.Builder()
                 .setTitle(stop.displayName(idx))
                 .setOnClickListener {
-                    screenManager.push(StopDetailScreen(carContext, stop, chargerMap))
+                    screenManager.push(StopDetailScreen(carContext, stop, chargerMap, idx))
                 }
 
             if (charger == null) {

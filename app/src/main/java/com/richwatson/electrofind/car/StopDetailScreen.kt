@@ -23,6 +23,7 @@ import com.richwatson.electrofind.R
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.api.models.isStaleForRefresh
@@ -39,7 +40,8 @@ import kotlinx.coroutines.launch
 class StopDetailScreen(
     carContext: CarContext,
     private var stop: RouteStop,
-    initialChargerMap: Map<Long, ChargingLocation>
+    initialChargerMap: Map<Long, ChargingLocation>,
+    private val stopIndex: Int
 ) : Screen(carContext) {
 
     private val app = carContext.applicationContext as ElectroFindApp
@@ -117,7 +119,7 @@ class StopDetailScreen(
         Log.e("StopDetailScreen", "onGetTemplate crash", e)
         dlog("onGetTemplate CRASH: ${e::class.simpleName}: ${e.message}\n${e.stackTraceToString()}")
         MessageTemplate.Builder("Error: ${e.message}")
-            .setTitle(stop.displayName(0))
+            .setTitle(stop.displayName(stopIndex))
             .setHeaderAction(Action.BACK)
             .build()
     }
@@ -126,7 +128,7 @@ class StopDetailScreen(
 
         val activeCharger = chargerMap[stop.activePk]
             ?: return ListTemplate.Builder()
-                .setTitle(stop.displayName(0))
+                .setTitle(stop.displayName(stopIndex))
                 .setHeaderAction(Action.BACK)
                 .setLoading(true)
                 .build().also { dlog("onGetTemplateInternal: activeCharger missing, returning loading template") }
@@ -149,7 +151,7 @@ class StopDetailScreen(
         // Must stay identical across every background-triggered invalidate() — the Car App
         // host only treats a template rebuild as a free "refresh" (not counting against the
         // task flow's step quota) if the title is unchanged from the previous one.
-        val baseTitle = stop.displayName(stop.chargerPks.indexOf(stop.activePk))
+        val baseTitle = stop.displayName(stopIndex)
 
         val maxItems = carContext.getCarService(ConstraintManager::class.java)
             .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
@@ -527,6 +529,24 @@ class StopDetailScreen(
     private fun saveStop(updated: RouteStop) {
         chargerPage = 0
         stop = updated
+
+        // rawTrips is the primary multi-trip storage RouteListScreen.loadTrips() actually reads
+        // (rawRoutePlan below is only its legacy single-trip fallback) — without updating it here,
+        // an edit made in the car appears to silently revert when navigating back to the stop list.
+        val tripsRaw = prefs.rawTrips
+        val tripsType = object : TypeToken<List<Trip>>() {}.type
+        val trips: List<Trip> = try {
+            if (tripsRaw.isEmpty() || tripsRaw == "[]") emptyList() else gson.fromJson(tripsRaw, tripsType) ?: emptyList()
+        } catch (e: Exception) { emptyList() }
+        if (trips.isNotEmpty()) {
+            val newTrips = trips.map { trip ->
+                if (trip.stops.any { it.id == updated.id }) {
+                    trip.copy(stops = trip.stops.map { if (it.id == updated.id) updated else it })
+                } else trip
+            }
+            prefs.rawTrips = gson.toJson(newTrips)
+        }
+
         val raw = prefs.rawRoutePlan
         val type = object : TypeToken<List<RouteStop>>() {}.type
         val stops: List<RouteStop> = try {
