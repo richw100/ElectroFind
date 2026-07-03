@@ -202,7 +202,7 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
                             position = idx,
                             totalStops = stops.size,
                             charger = charger,
-                            currencySymbol = state.currencySymbol,
+                            currencySymbol = charger?.currencySymbol ?: state.currencySymbol,
                             allChargers = state.routeChargers,
                             refreshPeriodMs = state.refreshPeriodMs,
                             onMoveUp = { chargerViewModel.moveRouteStop(stop.id, -1) },

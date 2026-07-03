@@ -74,6 +74,17 @@ data class ChargingLocation(
             .firstOrNull()
     }
 
+    // The charger's own currency, as reported by the API — chargers can be priced in a
+    // different currency than the search location's detected default (e.g. near a border),
+    // so this should be preferred over the app-wide default wherever a price is shown.
+    val currencySymbol: String? get() {
+        return evses.edges
+            .flatMap { it.node.connectors.edges }
+            .flatMap { it.node.priceComponents }
+            .firstOrNull { it.currencyDetails != null }
+            ?.currencyDetails?.symbol
+    }
+
     val connectionFeeMajor: Double? get() {
         return evses.edges
             .flatMap { it.node.connectors.edges }

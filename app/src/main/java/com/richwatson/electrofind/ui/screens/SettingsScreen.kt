@@ -178,6 +178,24 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            Text("Refresh period", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "How often charger availability refreshes in the background (Android Auto and route screens)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1, 2, 5, 10, 15, 30).forEach { minutes ->
+                    FilterChip(
+                        selected = state.refreshPeriodMs == minutes * 60_000L,
+                        onClick = { chargerViewModel.setRefreshPeriodMs(minutes * 60_000L) },
+                        label = { Text("$minutes min") }
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

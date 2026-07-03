@@ -297,6 +297,11 @@ class ChargerViewModel(
         _state.update { it.copy(searchRadiusMiles = miles) }
     }
 
+    fun setRefreshPeriodMs(ms: Long) {
+        appPreferences.refreshPeriodMs = ms
+        _state.update { it.copy(refreshPeriodMs = ms) }
+    }
+
     fun setThemeMode(mode: ThemeMode) {
         appPreferences.themeMode = mode
         _state.update { it.copy(themeMode = mode) }

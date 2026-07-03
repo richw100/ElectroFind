@@ -137,7 +137,7 @@ fun AddEditCustomChargerScreen(
             OutlinedTextField(
                 value = pricePerKwh,
                 onValueChange = { pricePerKwh = it },
-                label = { Text("Price per kWh (£)") },
+                label = { Text("Price per kWh (${state.currencySymbol})") },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 placeholder = { Text("e.g. 0.35") }
@@ -145,7 +145,7 @@ fun AddEditCustomChargerScreen(
             OutlinedTextField(
                 value = connectionFee,
                 onValueChange = { connectionFee = it },
-                label = { Text("Connection fee (£, optional)") },
+                label = { Text("Connection fee (${state.currencySymbol}, optional)") },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 placeholder = { Text("e.g. 1.00") }
@@ -153,7 +153,7 @@ fun AddEditCustomChargerScreen(
             OutlinedTextField(
                 value = chargingRate,
                 onValueChange = { chargingRate = it },
-                label = { Text("Charging rate per min (£, optional)") },
+                label = { Text("Charging rate per min (${state.currencySymbol}, optional)") },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 placeholder = { Text("e.g. 0.010") }
@@ -161,7 +161,7 @@ fun AddEditCustomChargerScreen(
             OutlinedTextField(
                 value = idleRate,
                 onValueChange = { idleRate = it },
-                label = { Text("Idle rate per min (£, optional)") },
+                label = { Text("Idle rate per min (${state.currencySymbol}, optional)") },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 placeholder = { Text("e.g. 0.010") }

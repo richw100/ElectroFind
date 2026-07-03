@@ -134,6 +134,12 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
                         .setOnClickListener { loadData() }
                         .build()
                 )
+                .addAction(
+                    Action.Builder()
+                        .setTitle("Refresh period")
+                        .setOnClickListener { screenManager.push(refreshPeriodPickerScreen()) }
+                        .build()
+                )
                 .build()
         }
 
@@ -144,9 +150,12 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
         val refreshIcon = CarIcon.Builder(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_refresh)
         ).build()
+        val editIcon = CarIcon.Builder(
+            IconCompat.createWithResource(carContext, R.drawable.ic_car_edit)
+        ).build()
 
         if (trips.size == 1) {
-            return stopsTemplate(trips[0], "Route stops · v$versionName", Action.APP_ICON, refreshIcon)
+            return stopsTemplate(trips[0], "Route stops · v$versionName", Action.APP_ICON, refreshIcon, editIcon)
         }
 
         // Multiple trips — show trip list
@@ -180,6 +189,13 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
                     .setOnClickListener { loadData() }
                     .build()
             )
+            .addAction(
+                Action.Builder()
+                    .setIcon(editIcon)
+                    .setBackgroundColor(CarColor.SECONDARY)
+                    .setOnClickListener { screenManager.push(refreshPeriodPickerScreen()) }
+                    .build()
+            )
             .build()
     }
 
@@ -188,11 +204,38 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             val refreshIcon = CarIcon.Builder(
                 IconCompat.createWithResource(carContext, R.drawable.ic_car_refresh)
             ).build()
-            return stopsTemplate(trip, trip.name, Action.BACK, refreshIcon)
+            val editIcon = CarIcon.Builder(
+                IconCompat.createWithResource(carContext, R.drawable.ic_car_edit)
+            ).build()
+            return stopsTemplate(trip, trip.name, Action.BACK, refreshIcon, editIcon)
         }
     }
 
-    private fun stopsTemplate(trip: Trip, title: String, headerAction: Action, refreshIcon: CarIcon): ListTemplate {
+    private fun refreshPeriodPickerScreen(): Screen = object : Screen(carContext) {
+        override fun onGetTemplate(): Template {
+            val current = (prefs.refreshPeriodMs / 60_000L).toInt()
+            val listBuilder = ItemList.Builder()
+            listOf(1, 2, 5, 10, 15, 30).forEach { minutes ->
+                listBuilder.addItem(
+                    Row.Builder()
+                        .setTitle(if (minutes == current) "★ $minutes min" else "$minutes min")
+                        .setOnClickListener {
+                            prefs.refreshPeriodMs = minutes * 60_000L
+                            invalidate()
+                            screenManager.pop()
+                        }
+                        .build()
+                )
+            }
+            return ListTemplate.Builder()
+                .setTitle("Refresh period")
+                .setHeaderAction(Action.BACK)
+                .setSingleList(listBuilder.build())
+                .build()
+        }
+    }
+
+    private fun stopsTemplate(trip: Trip, title: String, headerAction: Action, refreshIcon: CarIcon, editIcon: CarIcon): ListTemplate {
         val navigateIcon = CarIcon.Builder(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_navigate)
         ).build()
@@ -237,6 +280,13 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
                     .setIcon(refreshIcon)
                     .setBackgroundColor(CarColor.PRIMARY)
                     .setOnClickListener { loadData() }
+                    .build()
+            )
+            .addAction(
+                Action.Builder()
+                    .setIcon(editIcon)
+                    .setBackgroundColor(CarColor.SECONDARY)
+                    .setOnClickListener { screenManager.push(refreshPeriodPickerScreen()) }
                     .build()
             )
             .build()

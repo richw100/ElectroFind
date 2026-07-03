@@ -84,6 +84,7 @@ fun CustomChargersScreen(
                     items(state.rawCustomChargers, key = { it.id }) { charger ->
                         CustomChargerRow(
                             charger = charger,
+                            currencySymbol = state.currencySymbol,
                             onEdit = { onEdit(charger.id) },
                             onDelete = { pendingDelete = charger }
                         )
@@ -114,6 +115,7 @@ fun CustomChargersScreen(
 @Composable
 private fun CustomChargerRow(
     charger: CustomCharger,
+    currencySymbol: String,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -141,15 +143,15 @@ private fun CustomChargerRow(
                     else -> "Rapid"
                 }
                 Text(
-                    "${charger.connectorType} · ${charger.maxKilowatts.toInt()} kW ($speedLabel) · £${"%.2f".format(charger.pricePerKwh)}/kWh",
+                    "${charger.connectorType} · ${charger.maxKilowatts.toInt()} kW ($speedLabel) · $currencySymbol${"%.2f".format(charger.pricePerKwh)}/kWh",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (charger.connectionFeeGbp > 0 || charger.chargingRatePerMin > 0 || charger.idleRatePerMin > 0) {
                     val extras = buildList {
-                        if (charger.connectionFeeGbp > 0) add("£${"%.2f".format(charger.connectionFeeGbp)} conn.")
-                        if (charger.chargingRatePerMin > 0) add("£${"%.3f".format(charger.chargingRatePerMin)}/min")
-                        if (charger.idleRatePerMin > 0) add("£${"%.3f".format(charger.idleRatePerMin)}/min idle")
+                        if (charger.connectionFeeGbp > 0) add("$currencySymbol${"%.2f".format(charger.connectionFeeGbp)} conn.")
+                        if (charger.chargingRatePerMin > 0) add("$currencySymbol${"%.3f".format(charger.chargingRatePerMin)}/min")
+                        if (charger.idleRatePerMin > 0) add("$currencySymbol${"%.3f".format(charger.idleRatePerMin)}/min idle")
                     }
                     Text(
                         extras.joinToString(" · "),

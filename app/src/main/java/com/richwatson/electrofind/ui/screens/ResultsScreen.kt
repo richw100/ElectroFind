@@ -162,7 +162,7 @@ fun ResultsScreen(
                         else null
                         ChargerCard(
                             charger = charger,
-                            currencySymbol = state.currencySymbol,
+                            currencySymbol = charger.currencySymbol ?: state.currencySymbol,
                             session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes, state.activeProfile),
                             distanceMiles = distanceMiles,
                             refreshPeriodMs = state.refreshPeriodMs,

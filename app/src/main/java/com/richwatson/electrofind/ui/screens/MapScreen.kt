@@ -654,8 +654,12 @@ fun ChargerMapView(
         // Second pass: create markers
         chargers.forEachIndexed { idx, charger ->
             val score = scores[idx]
+            // Prefer the charger's own reported currency (chargers can be priced in a
+            // different currency than the search location's detected default) over the
+            // app-wide fallback.
+            val cur = charger.currencySymbol ?: currencySymbol
             // Only show session-cost label in session-cost modes; PER_KWH badge shows price via price param
-            val badgeLabel: String? = if (priceMode != MapPriceMode.PER_KWH) score?.let { "%s%.2f".format(currencySymbol, it) } else null
+            val badgeLabel: String? = if (priceMode != MapPriceMode.PER_KWH) score?.let { "%s%.2f".format(cur, it) } else null
             // Blended colour fraction: 50% percentile rank + 50% linear min-max.
             // Gives a spread across the full colour range while still showing meaningful
             // differences between genuinely cheap and moderately priced chargers.
@@ -695,9 +699,9 @@ fun ChargerMapView(
                             val cost = KonaChargeCurve.totalCost(sim, s.pricePerKwh,
                                 charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0,
                                 charger.parkingTimeRateMajor ?: 0.0, stayMins, charger.gracePeriodMinutes)
-                            "%s%.2f".format(currencySymbol, cost)
+                            "%s%.2f".format(cur, cost)
                         }
-                        s.pricePerKwh != null -> "%s%.2f".format(currencySymbol, s.pricePerKwh)
+                        s.pricePerKwh != null -> "%s%.2f".format(cur, s.pricePerKwh)
                         else -> "?"
                     }
                     val rowColor = when {
@@ -716,7 +720,7 @@ fun ChargerMapView(
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
                 title = (if (markerIsStale) "! " else "") + charger.name
                 snippet = buildString {
-                    charger.pricePerKwh?.let { append("%s%.2f/kWh · ".format(currencySymbol, it)) }
+                    charger.pricePerKwh?.let { append("%s%.2f/kWh · ".format(cur, it)) }
                     append(charger.operator.name)
                     val statusText = when {
                         charger.hasAvailableEvse  -> "Available"
@@ -727,7 +731,7 @@ fun ChargerMapView(
                 }
                 icon = priceBadgeDrawable(
                     context, charger.pricePerKwh, charger.isStale || markerIsStale,
-                    currencySymbol = currencySymbol,
+                    currencySymbol = cur,
                     labelOverride = badgeLabel,
                     isSelected = charger.pk == selectedChargerPk,
                     colorFraction = colorFraction,
@@ -873,6 +877,7 @@ fun ChargerMapView(
                         if (charger.pk in favouritePks) Text("Favourite", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE53935))
                         if (charger.pk in excludedPks) Text("Excluded", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
                     }
+                    val dialogCur = charger.currencySymbol ?: currencySymbol
                     val mapAvailByKw = charger.availabilityByKw
                     charger.connectorPriceSummaries.forEach { summary ->
                         val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
@@ -881,7 +886,7 @@ fun ChargerMapView(
                         } ?: ""
                         val priceLabel = when {
                             summary.isFree -> "Free"
-                            summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
+                            summary.pricePerKwh != null -> "%s%.2f/kWh".format(dialogCur, summary.pricePerKwh)
                             else -> "—"
                         }
                         val kwKey = summary.kilowatts?.toInt() ?: 0
@@ -905,13 +910,13 @@ fun ChargerMapView(
                         }
                     }
                     charger.connectionFeeMajor?.let {
-                        Text("+ %s%.2f connection fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("+ %s%.2f connection fee".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     charger.chargingTimeRateMajor?.let {
-                        Text("+ %s%.2f/min while charging".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("+ %s%.2f/min while charging".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     charger.parkingTimeRateMajor?.let {
-                        Text("+ %s%.2f/min idle fee".format(currencySymbol, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("+ %s%.2f/min idle fee".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     // Unified per-speed: availability + session cost
                     val popupPriceGroups = charger.connectorPriceSummaries
@@ -953,7 +958,7 @@ fun ChargerMapView(
                                 val optSoc = optResult.endSocPercent.toInt()
                                 val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
                                 val staySoc = stayResult.endSocPercent.toInt()
-                                val fmt: (Double) -> String = { c -> if (pg.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
+                                val fmt: (Double) -> String = { c -> if (pg.isFree) "FREE" else "$dialogCur${"%.2f".format(c)}" }
                                 Text("⚡ Optimal: $optLabel  ·  ${fmt(optCost)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                                 Text("🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                             }

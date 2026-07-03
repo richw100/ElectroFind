@@ -86,11 +86,12 @@ internal fun buildCostText(charger: ChargingLocation, stop: RouteStop): String {
         profile = CarProfile.KONA_LR
     )
     val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble(), gracePeriod)
+    val cur = charger.currencySymbol ?: "€"
 
     return buildString {
-        append("Opt £${"%.2f".format(optCost)} Stay £${"%.2f".format(stayCost)}")
-        if (connectionFee > 0) append(" +£${"%.2f".format(connectionFee)}")
-        if (chargingRate > 0) append(" +£${"%.2f".format(chargingRate)}/m")
-        if (parkingRate > 0) append(" +£${"%.2f".format(parkingRate)}/m park")
+        append("Opt $cur${"%.2f".format(optCost)} Stay $cur${"%.2f".format(stayCost)}")
+        if (connectionFee > 0) append(" +$cur${"%.2f".format(connectionFee)}")
+        if (chargingRate > 0) append(" +$cur${"%.2f".format(chargingRate)}/m")
+        if (parkingRate > 0) append(" +$cur${"%.2f".format(parkingRate)}/m park")
     }
 }
