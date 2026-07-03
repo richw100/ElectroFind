@@ -72,7 +72,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             val allPks = trips.flatMap { it.stops }.flatMap { it.chargerPks }
             if (allPks.isEmpty()) return@launch
             app.database.chargerDao().observeByPks(allPks).debounce(300).collect { entities ->
-                val (updated, changed) = diffCachedChargers(entities, parsedCache, gson)
+                val (updated, changed) = diffCachedChargers(entities, parsedCache, chargerMap, prefs.refreshPeriodMs, gson)
                 if (updated.isNotEmpty()) {
                     chargerMap = chargerMap + updated
                     if (changed) invalidate()

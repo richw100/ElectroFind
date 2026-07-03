@@ -78,7 +78,7 @@ class StopDetailScreen(
         // can trip the host's UX-restriction throttling.
         lifecycleScope.launch {
             dao.observeByPks(stop.chargerPks).debounce(300).collect { entities ->
-                val (updated, changed) = diffCachedChargers(entities, parsedCache, gson)
+                val (updated, changed) = diffCachedChargers(entities, parsedCache, chargerMap, prefs.refreshPeriodMs, gson)
                 dlog("db observe emit: entities=${entities.size} updated=${updated.size} changed=$changed pksBefore=${chargerMap.keys}")
                 if (updated.isNotEmpty()) {
                     chargerMap = chargerMap + updated
