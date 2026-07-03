@@ -20,8 +20,10 @@ import com.richwatson.electrofind.R
 import com.richwatson.electrofind.ElectroFindApp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.isStaleForRefresh
+import com.richwatson.electrofind.model.CustomCharger
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
+import com.richwatson.electrofind.model.toChargingLocation
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.ChargerRepository
 import android.content.pm.PackageManager
@@ -60,8 +62,13 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
 
         lifecycleScope.launch {
             val allPks = trips.flatMap { it.stops }.flatMap { it.chargerPks }.toSet()
-            val chargers = repo.getChargersByPks(allPks)
-            chargerMap = chargers.associateBy { it.pk }
+            // Custom chargers aren't in Electroverse's backend, so repo.getChargersByPks()
+            // would always fail to resolve them (Room cache miss -> network fetch -> null),
+            // leaving them stuck on a loading template forever. Resolve them locally instead.
+            val customByPk = loadCustomChargers().associateBy { it.pk }
+            val remotePks = allPks - customByPk.keys
+            val chargers = if (remotePks.isNotEmpty()) repo.getChargersByPks(remotePks) else emptyList()
+            chargerMap = allPks.mapNotNull { customByPk[it] }.associateBy { it.pk } + chargers.associateBy { it.pk }
             isLoading = false
             invalidate()
         }
@@ -102,6 +109,18 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             } catch (e: Exception) { emptyList() }
         }
         return emptyList()
+    }
+
+    private fun loadCustomChargers(): List<ChargingLocation> {
+        val raw = prefs.rawCustomChargers
+        if (raw.isEmpty()) return emptyList()
+        return try {
+            val type = object : TypeToken<List<CustomCharger>>() {}.type
+            (gson.fromJson<List<CustomCharger>>(raw, type) ?: emptyList()).map { it.toChargingLocation() }
+        } catch (e: Exception) {
+            Log.e("RouteListScreen", "Failed to parse rawCustomChargers", e)
+            emptyList()
+        }
     }
 
     override fun onGetTemplate(): Template {
