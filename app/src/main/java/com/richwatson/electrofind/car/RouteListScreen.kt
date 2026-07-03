@@ -212,26 +212,20 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
     }
 
     private fun refreshPeriodPickerScreen(): Screen = object : Screen(carContext) {
+        var page = 0
         override fun onGetTemplate(): Template {
             val current = (prefs.refreshPeriodMs / 60_000L).toInt()
-            val listBuilder = ItemList.Builder()
-            listOf(1, 2, 5, 10, 15, 30).forEach { minutes ->
-                listBuilder.addItem(
-                    Row.Builder()
-                        .setTitle(if (minutes == current) "★ $minutes min" else "$minutes min")
-                        .setOnClickListener {
-                            prefs.refreshPeriodMs = minutes * 60_000L
-                            invalidate()
-                            screenManager.pop()
-                        }
-                        .build()
-                )
+            val rows = listOf(1, 2, 5, 10, 15, 30).map { minutes ->
+                Row.Builder()
+                    .setTitle(if (minutes == current) "★ $minutes min" else "$minutes min")
+                    .setOnClickListener {
+                        prefs.refreshPeriodMs = minutes * 60_000L
+                        invalidate()
+                        screenManager.pop()
+                    }
+                    .build()
             }
-            return ListTemplate.Builder()
-                .setTitle("Refresh period")
-                .setHeaderAction(Action.BACK)
-                .setSingleList(listBuilder.build())
-                .build()
+            return carContext.pagedListTemplate("Refresh period", rows, page) { page = it; invalidate() }
         }
     }
 

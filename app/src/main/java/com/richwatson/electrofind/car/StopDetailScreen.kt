@@ -344,42 +344,32 @@ class StopDetailScreen(
         current: Int,
         onConfirm: (Int) -> Unit
     ): Screen = object : Screen(carContext) {
+        var page = 0
         override fun onGetTemplate(): Template {
-            val listBuilder = ItemList.Builder()
-            options.forEach { (label, value) ->
-                listBuilder.addItem(
-                    Row.Builder()
-                        .setTitle(if (value == current) "★ $label" else label)
-                        .setOnClickListener { onConfirm(value); screenManager.pop() }
-                        .build()
-                )
+            val rows = options.map { (label, value) ->
+                Row.Builder()
+                    .setTitle(if (value == current) "★ $label" else label)
+                    .setOnClickListener { onConfirm(value); screenManager.pop() }
+                    .build()
             }
-            return ListTemplate.Builder()
-                .setTitle(title)
-                .setHeaderAction(Action.BACK)
-                .setSingleList(listBuilder.build())
-                .build()
+            return carContext.pagedListTemplate(title, rows, page) { page = it; invalidate() }
         }
     }
 
     private fun arrivalTimePickerScreen(currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
         object : Screen(carContext) {
+            var page = 0
             override fun onGetTemplate(): Template {
                 val curHour = currentMinutes / 60
-                val listBuilder = ItemList.Builder()
-                (0..23).forEach { hour ->
-                    listBuilder.addItem(Row.Builder()
+                val rows = (0..23).map { hour ->
+                    Row.Builder()
                         .setTitle("${if (hour == curHour) "★ " else ""}%02d:xx".format(hour))
                         .setOnClickListener {
                             screenManager.push(arrivalMinutePickerScreen(hour, currentMinutes, onConfirm))
                         }
-                        .build())
+                        .build()
                 }
-                return ListTemplate.Builder()
-                    .setTitle("Arrival time — select hour")
-                    .setHeaderAction(Action.BACK)
-                    .setSingleList(listBuilder.build())
-                    .build()
+                return carContext.pagedListTemplate("Arrival time — select hour", rows, page) { page = it; invalidate() }
             }
         }
 
@@ -408,47 +398,40 @@ class StopDetailScreen(
 
     private fun stayTimePickerScreen(currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
         object : Screen(carContext) {
+            var page = 0
             override fun onGetTemplate(): Template {
                 val curHours = currentMinutes / 60
-                val listBuilder = ItemList.Builder()
-                (0..5).forEach { hours ->
-                    listBuilder.addItem(Row.Builder()
+                val rows = (0..5).map { hours ->
+                    Row.Builder()
                         .setTitle("${if (hours == curHours) "★ " else ""}$hours hour${if (hours != 1) "s" else ""}")
                         .setOnClickListener {
                             screenManager.push(stayMinutePickerScreen(hours, currentMinutes, onConfirm))
                         }
-                        .build())
+                        .build()
                 }
-                return ListTemplate.Builder()
-                    .setTitle("Stay time — select hours")
-                    .setHeaderAction(Action.BACK)
-                    .setSingleList(listBuilder.build())
-                    .build()
+                return carContext.pagedListTemplate("Stay time — select hours", rows, page) { page = it; invalidate() }
             }
         }
 
     private fun stayMinutePickerScreen(hours: Int, currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
         object : Screen(carContext) {
+            var page = 0
             override fun onGetTemplate(): Template {
                 val minuteOptions = if (hours == 0) (1..11).map { it * 5 }
                                     else (0..11).map { it * 5 }
-                val listBuilder = ItemList.Builder()
-                minuteOptions.forEach { mins ->
+                val rows = minuteOptions.map { mins ->
                     val total = hours * 60 + mins
-                    listBuilder.addItem(Row.Builder()
+                    Row.Builder()
                         .setTitle("${if (total == currentMinutes) "★ " else ""}$hours h ${"%02d".format(mins)} min")
                         .setOnClickListener {
                             onConfirm(total)
                             screenManager.pop() // minutes → hours
                             screenManager.pop() // hours → edit menu
                         }
-                        .build())
+                        .build()
                 }
-                return ListTemplate.Builder()
-                    .setTitle("Stay time — $hours hour${if (hours != 1) "s" else ""}, select minutes")
-                    .setHeaderAction(Action.BACK)
-                    .setSingleList(listBuilder.build())
-                    .build()
+                val title = "Stay time — $hours hour${if (hours != 1) "s" else ""}, select minutes"
+                return carContext.pagedListTemplate(title, rows, page) { page = it; invalidate() }
             }
         }
 
