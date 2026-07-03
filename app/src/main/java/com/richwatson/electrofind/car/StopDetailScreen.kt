@@ -29,7 +29,6 @@ import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.db.CachedChargerEntity
 import com.richwatson.electrofind.work.RefreshChargersWorker
-import androidx.car.app.constraints.ConstraintManager
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
@@ -79,23 +78,14 @@ class StopDetailScreen(
         // can trip the host's UX-restriction throttling.
         lifecycleScope.launch {
             dao.observeByPks(stop.chargerPks).debounce(300).collect { entities ->
-                val fresh = entities.mapNotNull { entity ->
-                    val cached = parsedCache[entity.pk]
-                    if (cached != null && cached.first == entity.json) {
-                        cached.second.copy(cachedAt = entity.cachedAt)
-                    } else {
-                        try {
-                            val parsed = gson.fromJson(entity.json, ChargingLocation::class.java)
-                            parsedCache[entity.pk] = entity.json to parsed
-                            parsed.copy(cachedAt = entity.cachedAt)
-                        } catch (_: Exception) { null }
+                val (updated, changed) = diffCachedChargers(entities, parsedCache, gson)
+                dlog("db observe emit: entities=${entities.size} updated=${updated.size} changed=$changed pksBefore=${chargerMap.keys}")
+                if (updated.isNotEmpty()) {
+                    chargerMap = chargerMap + updated
+                    if (changed) {
+                        dlog("db observe -> invalidate() chargerMapSize=${chargerMap.size}")
+                        invalidate()
                     }
-                }
-                dlog("db observe emit: entities=${entities.size} fresh=${fresh.size} pksBefore=${chargerMap.keys}")
-                if (fresh.isNotEmpty()) {
-                    chargerMap = chargerMap + fresh.associateBy { it.pk }
-                    dlog("db observe -> invalidate() chargerMapSize=${chargerMap.size}")
-                    invalidate()
                 }
             }
         }
@@ -133,9 +123,6 @@ class StopDetailScreen(
                 .setLoading(true)
                 .build().also { dlog("onGetTemplateInternal: activeCharger missing, returning loading template") }
 
-        val editIcon = CarIcon.Builder(
-            IconCompat.createWithResource(carContext, R.drawable.ic_car_edit)
-        ).build()
         val navigateIcon = CarIcon.Builder(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_navigate)
         ).build()
@@ -143,82 +130,82 @@ class StopDetailScreen(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_star)
         ).build()
 
-        val editFab = Action.Builder()
-            .setIcon(editIcon)
-            .setBackgroundColor(CarColor.PRIMARY)
-            .setOnClickListener { screenManager.push(editMenuScreen()) }
-            .build()
         // Must stay identical across every background-triggered invalidate() — the Car App
         // host only treats a template rebuild as a free "refresh" (not counting against the
         // task flow's step quota) if the title is unchanged from the previous one.
         val baseTitle = stop.displayName(stopIndex)
 
-        val maxItems = carContext.getCarService(ConstraintManager::class.java)
-            .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
-
         // Active charger always first so it's always on page 0
         val sortedPks = stop.chargerPks.sortedByDescending { if (it == stop.activePk) 1 else 0 }
-
-        dlog("onGetTemplateInternal: maxItems=$maxItems sortedPks=${sortedPks.size} chargerMapKeys=${chargerMap.keys} chargerPage=$chargerPage branch=${if (sortedPks.size <= maxItems) "single" else "multi"}")
-
-        if (sortedPks.size <= maxItems) {
-            val listBuilder = ItemList.Builder()
-            sortedPks.forEach { pk ->
-                val charger = chargerMap[pk] ?: return@forEach
-                val isActivePk = pk == stop.activePk
-                val prefix = if (isActivePk) "★ " else ""
-                val onSelect: () -> Unit = { screenManager.push(chargerDetailScreen(charger, stop)) }
-                val onMakePrimary: () -> Unit = { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
-                listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary))
-            }
-            val builtList = listBuilder.build()
-            dlog("onGetTemplateInternal: single-page returning rowCount=${builtList.items.size} title=\"$baseTitle\"")
-            return ListTemplate.Builder()
-                .setTitle(baseTitle)
-                .setHeaderAction(Action.BACK)
-                .setSingleList(builtList)
-                .addAction(editFab)
-                .build()
-        }
-
-        // Multi-page: reserve 2 slots for ← Previous / Next → rows
-        val chargersPerPage = maxOf(1, maxItems - 2)
-        val totalPages = (sortedPks.size + chargersPerPage - 1) / chargersPerPage
-        val page = chargerPage.coerceIn(0, totalPages - 1)
-        if (chargerPage != page) chargerPage = page
-        val pageChargers = sortedPks.drop(page * chargersPerPage).take(chargersPerPage)
-        dlog("onGetTemplateInternal: multi-page chargersPerPage=$chargersPerPage totalPages=$totalPages page=$page pageChargers=${pageChargers.size}")
-
-        val listBuilder = ItemList.Builder()
-        if (page > 0) {
-            listBuilder.addItem(Row.Builder()
-                .setTitle("← Previous")
-                .setOnClickListener { chargerPage--; invalidate() }
-                .build())
-        }
-        pageChargers.forEach { pk ->
-            val charger = chargerMap[pk] ?: return@forEach
+        val chargerRows = sortedPks.mapNotNull { pk ->
+            val charger = chargerMap[pk] ?: return@mapNotNull null
             val isActivePk = pk == stop.activePk
             val prefix = if (isActivePk) "★ " else ""
             val onSelect: () -> Unit = { screenManager.push(chargerDetailScreen(charger, stop)) }
             val onMakePrimary: () -> Unit = { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
-            listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary))
-        }
-        if (page < totalPages - 1) {
-            listBuilder.addItem(Row.Builder()
-                .setTitle("Next →")
-                .setOnClickListener { chargerPage++; invalidate() }
-                .build())
+            chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary)
         }
 
-        val builtList = listBuilder.build()
-        dlog("onGetTemplateInternal: multi-page returning rowCount=${builtList.items.size} title=\"$baseTitle · ${page + 1}/$totalPages\"")
-        return ListTemplate.Builder()
-            .setTitle("$baseTitle · ${page + 1}/$totalPages")
-            .setHeaderAction(Action.BACK)
-            .setSingleList(builtList)
-            .addAction(editFab)
-            .build()
+        // Settings rows are appended directly here (rather than behind a separate "Edit stop"
+        // screen) so opening one only costs one push beyond StopDetailScreen, not two — see the
+        // task-quota writeup in the plan this replaced editMenuScreen() from.
+        val rows = chargerRows + settingsRows()
+        dlog("onGetTemplateInternal: chargerRows=${chargerRows.size} totalRows=${rows.size} chargerPage=$chargerPage")
+        return carContext.pagedListTemplate(baseTitle, rows, chargerPage) { chargerPage = it; invalidate() }
+    }
+
+    private fun settingsRows(): List<Row> {
+        val socIdx = stop.arrivalSocPercent
+        val depSoc = stop.departureSocPercent
+        val stay = stop.stayMinutes
+        return listOf(
+            Row.Builder()
+                .setTitle("Arrival SoC (currently $socIdx%)")
+                .setOnClickListener {
+                    screenManager.push(paramPickerScreen(
+                        "Arrival SoC",
+                        listOf(5, 10, 15, 20, 25, 30).map { "$it%" to it },
+                        socIdx
+                    ) { value -> saveStop(stop.copy(arrivalSocPercent = value)) })
+                }
+                .build(),
+            Row.Builder()
+                .setTitle("Departure SoC (currently $depSoc%)")
+                .setOnClickListener {
+                    screenManager.push(paramPickerScreen(
+                        "Departure SoC",
+                        listOf(60, 70, 75, 80, 85, 90).map { "$it%" to it },
+                        depSoc
+                    ) { value -> saveStop(stop.copy(departureSocPercent = value)) })
+                }
+                .build(),
+            Row.Builder()
+                .setTitle("Stay time (currently ${stay / 60}h ${"%02d".format(stay % 60)}min)")
+                .setOnClickListener {
+                    screenManager.push(stayTimePickerScreen(stay) { value ->
+                        saveStop(stop.copy(stayMinutes = value))
+                    })
+                }
+                .build(),
+            Row.Builder()
+                .setTitle("Arrival time (currently %02d:%02d)".format(stop.arrivalTimeMinutes / 60, stop.arrivalTimeMinutes % 60))
+                .setOnClickListener {
+                    screenManager.push(arrivalTimePickerScreen(stop.arrivalTimeMinutes) { value ->
+                        saveStop(stop.copy(arrivalTimeMinutes = value))
+                    })
+                }
+                .build(),
+            Row.Builder()
+                .setTitle("Refresh period (currently ${prefs.refreshPeriodMs / 60_000L} min)")
+                .setOnClickListener {
+                    screenManager.push(paramPickerScreen(
+                        "Refresh period",
+                        listOf(1, 2, 5, 10, 15, 30).map { "$it min" to it },
+                        (prefs.refreshPeriodMs / 60_000L).toInt()
+                    ) { value -> prefs.refreshPeriodMs = value * 60_000L; invalidate() })
+                }
+                .build()
+        )
     }
 
     private fun chargerRow(
@@ -356,158 +343,41 @@ class StopDetailScreen(
         }
     }
 
+    // Flattened into one screen (rather than a pick-hour-then-pick-minute drill-down) so opening
+    // it only costs one step of the Car App host's task template quota, not two.
     private fun arrivalTimePickerScreen(currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
         object : Screen(carContext) {
             var page = 0
             override fun onGetTemplate(): Template {
-                val curHour = currentMinutes / 60
-                val rows = (0..23).map { hour ->
+                val rows = (0..23).flatMap { hour -> listOf(0, 30).map { mins -> hour to mins } }.map { (hour, mins) ->
+                    val total = hour * 60 + mins
                     Row.Builder()
-                        .setTitle("${if (hour == curHour) "★ " else ""}%02d:xx".format(hour))
-                        .setOnClickListener {
-                            screenManager.push(arrivalMinutePickerScreen(hour, currentMinutes, onConfirm))
-                        }
+                        .setTitle("${if (total == currentMinutes) "★ " else ""}%02d:%02d".format(hour, mins))
+                        .setOnClickListener { onConfirm(total); screenManager.pop() }
                         .build()
                 }
-                return carContext.pagedListTemplate("Arrival time — select hour", rows, page) { page = it; invalidate() }
+                return carContext.pagedListTemplate("Arrival time", rows, page) { page = it; invalidate() }
             }
         }
 
-    private fun arrivalMinutePickerScreen(hour: Int, currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
-        object : Screen(carContext) {
-            override fun onGetTemplate(): Template {
-                val listBuilder = ItemList.Builder()
-                listOf(0, 30).forEach { mins ->
-                    val total = hour * 60 + mins
-                    listBuilder.addItem(Row.Builder()
-                        .setTitle("${if (total == currentMinutes) "★ " else ""}%02d:%02d".format(hour, mins))
-                        .setOnClickListener {
-                            onConfirm(total)
-                            screenManager.pop()
-                            screenManager.pop()
-                        }
-                        .build())
-                }
-                return ListTemplate.Builder()
-                    .setTitle("Arrival time — %02d:xx, select minutes".format(hour))
-                    .setHeaderAction(Action.BACK)
-                    .setSingleList(listBuilder.build())
-                    .build()
-            }
-        }
-
+    // Flattened into one screen for the same reason as arrivalTimePickerScreen above.
     private fun stayTimePickerScreen(currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
         object : Screen(carContext) {
             var page = 0
             override fun onGetTemplate(): Template {
-                val curHours = currentMinutes / 60
-                val rows = (0..5).map { hours ->
-                    Row.Builder()
-                        .setTitle("${if (hours == curHours) "★ " else ""}$hours hour${if (hours != 1) "s" else ""}")
-                        .setOnClickListener {
-                            screenManager.push(stayMinutePickerScreen(hours, currentMinutes, onConfirm))
-                        }
-                        .build()
-                }
-                return carContext.pagedListTemplate("Stay time — select hours", rows, page) { page = it; invalidate() }
-            }
-        }
-
-    private fun stayMinutePickerScreen(hours: Int, currentMinutes: Int, onConfirm: (Int) -> Unit): Screen =
-        object : Screen(carContext) {
-            var page = 0
-            override fun onGetTemplate(): Template {
-                val minuteOptions = if (hours == 0) (1..11).map { it * 5 }
-                                    else (0..11).map { it * 5 }
-                val rows = minuteOptions.map { mins ->
+                val rows = (0..5).flatMap { hours ->
+                    val minuteOptions = if (hours == 0) (1..11).map { it * 5 } else (0..11).map { it * 5 }
+                    minuteOptions.map { mins -> hours to mins }
+                }.map { (hours, mins) ->
                     val total = hours * 60 + mins
                     Row.Builder()
                         .setTitle("${if (total == currentMinutes) "★ " else ""}$hours h ${"%02d".format(mins)} min")
-                        .setOnClickListener {
-                            onConfirm(total)
-                            screenManager.pop() // minutes → hours
-                            screenManager.pop() // hours → edit menu
-                        }
+                        .setOnClickListener { onConfirm(total); screenManager.pop() }
                         .build()
                 }
-                val title = "Stay time — $hours hour${if (hours != 1) "s" else ""}, select minutes"
-                return carContext.pagedListTemplate(title, rows, page) { page = it; invalidate() }
+                return carContext.pagedListTemplate("Stay time", rows, page) { page = it; invalidate() }
             }
         }
-
-    private fun editMenuScreen(): Screen {
-        return object : Screen(carContext) {
-            override fun onGetTemplate(): Template {
-                val socIdx = stop.arrivalSocPercent
-                val depSoc = stop.departureSocPercent
-                val stay = stop.stayMinutes
-
-                val listBuilder = ItemList.Builder()
-                    .addItem(
-                        Row.Builder()
-                            .setTitle("Arrival SoC (currently $socIdx%)")
-                            .setOnClickListener {
-                                screenManager.push(paramPickerScreen(
-                                    "Arrival SoC",
-                                    listOf(5, 10, 15, 20, 25, 30).map { "$it%" to it },
-                                    socIdx
-                                ) { value -> saveStop(stop.copy(arrivalSocPercent = value)) })
-                            }
-                            .build()
-                    )
-                    .addItem(
-                        Row.Builder()
-                            .setTitle("Departure SoC (currently $depSoc%)")
-                            .setOnClickListener {
-                                screenManager.push(paramPickerScreen(
-                                    "Departure SoC",
-                                    listOf(60, 70, 75, 80, 85, 90).map { "$it%" to it },
-                                    depSoc
-                                ) { value -> saveStop(stop.copy(departureSocPercent = value)) })
-                            }
-                            .build()
-                    )
-                    .addItem(
-                        Row.Builder()
-                            .setTitle("Stay time (currently ${stay / 60}h ${"%02d".format(stay % 60)}min)")
-                            .setOnClickListener {
-                                screenManager.push(stayTimePickerScreen(stay) { value ->
-                                    saveStop(stop.copy(stayMinutes = value))
-                                })
-                            }
-                            .build()
-                    )
-                    .addItem(
-                        Row.Builder()
-                            .setTitle("Arrival time (currently %02d:%02d)".format(stop.arrivalTimeMinutes / 60, stop.arrivalTimeMinutes % 60))
-                            .setOnClickListener {
-                                screenManager.push(arrivalTimePickerScreen(stop.arrivalTimeMinutes) { value ->
-                                    saveStop(stop.copy(arrivalTimeMinutes = value))
-                                })
-                            }
-                            .build()
-                    )
-                    .addItem(
-                        Row.Builder()
-                            .setTitle("Refresh period (currently ${prefs.refreshPeriodMs / 60_000L} min)")
-                            .setOnClickListener {
-                                screenManager.push(paramPickerScreen(
-                                    "Refresh period",
-                                    listOf(1, 2, 5, 10, 15, 30).map { "$it min" to it },
-                                    (prefs.refreshPeriodMs / 60_000L).toInt()
-                                ) { value -> prefs.refreshPeriodMs = value * 60_000L; invalidate() })
-                            }
-                            .build()
-                    )
-
-                return ListTemplate.Builder()
-                    .setTitle("Edit stop")
-                    .setHeaderAction(Action.BACK)
-                    .setSingleList(listBuilder.build())
-                    .build()
-            }
-        }
-    }
 
     private fun saveStop(updated: RouteStop) {
         chargerPage = 0

@@ -72,21 +72,10 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             val allPks = trips.flatMap { it.stops }.flatMap { it.chargerPks }
             if (allPks.isEmpty()) return@launch
             app.database.chargerDao().observeByPks(allPks).debounce(300).collect { entities ->
-                val fresh = entities.mapNotNull { entity ->
-                    val cached = parsedCache[entity.pk]
-                    if (cached != null && cached.first == entity.json) {
-                        cached.second.copy(cachedAt = entity.cachedAt)
-                    } else {
-                        try {
-                            val parsed = gson.fromJson(entity.json, ChargingLocation::class.java)
-                            parsedCache[entity.pk] = entity.json to parsed
-                            parsed.copy(cachedAt = entity.cachedAt)
-                        } catch (_: Exception) { null }
-                    }
-                }
-                if (fresh.isNotEmpty()) {
-                    chargerMap = chargerMap + fresh.associateBy { it.pk }
-                    invalidate()
+                val (updated, changed) = diffCachedChargers(entities, parsedCache, gson)
+                if (updated.isNotEmpty()) {
+                    chargerMap = chargerMap + updated
+                    if (changed) invalidate()
                 }
             }
         }
