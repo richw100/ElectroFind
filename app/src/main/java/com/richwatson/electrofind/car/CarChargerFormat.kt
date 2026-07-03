@@ -1,6 +1,7 @@
 package com.richwatson.electrofind.car
 
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.ConnectorPriceSummary
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.util.KonaChargeCurve
@@ -64,6 +65,20 @@ internal fun abbreviateConnectorType(type: String): String = when {
 internal fun buildCostText(charger: ChargingLocation, stop: RouteStop): String {
     val kw = charger.maxKilowatts ?: return ""
     val price = charger.pricePerKwh ?: return ""
+    return buildCostTextFor(charger, stop, kw, price)
+}
+
+// Per-connector-tier variant: a charger can have multiple connector speeds priced
+// differently (e.g. 110kW vs 22kW), so the combined buildCostText() above doesn't tell
+// you which price it used — this computes the estimate for one specific tier instead.
+internal fun buildConnectorCostText(charger: ChargingLocation, stop: RouteStop, summary: ConnectorPriceSummary): String {
+    if (summary.isFree) return "FREE"
+    val kw = summary.kilowatts ?: return ""
+    val price = summary.pricePerKwh ?: return ""
+    return buildCostTextFor(charger, stop, kw, price)
+}
+
+private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double): String {
     val connectionFee = charger.connectionFeeMajor ?: 0.0
     val chargingRate = charger.chargingTimeRateMajor ?: 0.0
     val parkingRate = charger.parkingTimeRateMajor ?: 0.0

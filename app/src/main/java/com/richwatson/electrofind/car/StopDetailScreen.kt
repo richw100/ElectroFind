@@ -21,7 +21,9 @@ import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.ElectroFindApp
 import com.richwatson.electrofind.R
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.db.CachedChargerEntity
@@ -135,6 +137,9 @@ class StopDetailScreen(
         val navigateIcon = CarIcon.Builder(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_navigate)
         ).build()
+        val starIcon = CarIcon.Builder(
+            IconCompat.createWithResource(carContext, R.drawable.ic_car_star)
+        ).build()
 
         val editFab = Action.Builder()
             .setIcon(editIcon)
@@ -158,11 +163,11 @@ class StopDetailScreen(
             val listBuilder = ItemList.Builder()
             sortedPks.forEach { pk ->
                 val charger = chargerMap[pk] ?: return@forEach
-                val prefix = if (pk == stop.activePk) "★ " else ""
-                val onSelect: (() -> Unit) = if (pk != stop.activePk) {
-                    { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
-                } else { { screenManager.push(editMenuScreen()) } }
-                listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, onSelect))
+                val isActivePk = pk == stop.activePk
+                val prefix = if (isActivePk) "★ " else ""
+                val onSelect: () -> Unit = { screenManager.push(chargerDetailScreen(charger, stop)) }
+                val onMakePrimary: () -> Unit = { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
+                listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary))
             }
             val builtList = listBuilder.build()
             dlog("onGetTemplateInternal: single-page returning rowCount=${builtList.items.size} title=\"$baseTitle\"")
@@ -191,11 +196,11 @@ class StopDetailScreen(
         }
         pageChargers.forEach { pk ->
             val charger = chargerMap[pk] ?: return@forEach
-            val prefix = if (pk == stop.activePk) "★ " else ""
-            val onSelect: (() -> Unit) = if (pk != stop.activePk) {
-                { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
-            } else { { screenManager.push(editMenuScreen()) } }
-            listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, onSelect))
+            val isActivePk = pk == stop.activePk
+            val prefix = if (isActivePk) "★ " else ""
+            val onSelect: () -> Unit = { screenManager.push(chargerDetailScreen(charger, stop)) }
+            val onMakePrimary: () -> Unit = { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
+            listBuilder.addItem(chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary))
         }
         if (page < totalPages - 1) {
             listBuilder.addItem(Row.Builder()
@@ -214,7 +219,16 @@ class StopDetailScreen(
             .build()
     }
 
-    private fun chargerRow(charger: ChargingLocation, prefix: String, stop: RouteStop, navigateIcon: CarIcon, onSelect: () -> Unit): Row {
+    private fun chargerRow(
+        charger: ChargingLocation,
+        prefix: String,
+        stop: RouteStop,
+        navigateIcon: CarIcon,
+        starIcon: CarIcon,
+        isActive: Boolean,
+        onSelect: () -> Unit,
+        onMakePrimary: () -> Unit
+    ): Row {
         val (line1, line2) = charger.chargerDetailLines(stop)
 
         val lat = charger.coordinates.latitude
@@ -237,8 +251,90 @@ class StopDetailScreen(
                     }
                     .build()
             )
+            .apply {
+                // Omitted on the already-active row — navigate is still useful there,
+                // but "make primary" is meaningless when it's already primary.
+                if (!isActive) {
+                    addAction(
+                        Action.Builder()
+                            .setIcon(starIcon)
+                            .setOnClickListener(onMakePrimary)
+                            .build()
+                    )
+                }
+            }
             .build()
     }
+
+    // Per-connector-tier breakdown for one charger — a charger can have multiple connector
+    // speeds priced differently (e.g. 110kW vs 22kW), which the combined cost text on the
+    // main list row can't distinguish since a Row is capped at 2 text lines.
+    private fun chargerDetailScreen(charger: ChargingLocation, stop: RouteStop): Screen =
+        object : Screen(carContext) {
+            override fun onGetTemplate(): Template {
+                val availByKw = charger.availabilityByKw
+                val listBuilder = ItemList.Builder()
+                charger.connectorPriceSummaries.forEach { s ->
+                    val kwInt = s.kilowatts?.toInt()
+                    val (avail, inUse, fault) = kwInt?.let { availByKw[it] } ?: Triple(0, 0, 0)
+                    val total = avail + inUse + fault
+                    val typeLabel = abbreviateConnectorType(s.type)
+
+                    val title = buildString {
+                        if (s.kilowatts != null) append("${s.kilowatts.toInt()} kW")
+                        if (typeLabel.isNotEmpty()) { if (isNotEmpty()) append(" · "); append(typeLabel) }
+                    }.ifEmpty { "Unknown connector" }
+
+                    val line1 = if (total > 0) "$avail avail · $inUse in use · $fault fault (of $total)"
+                                else "Availability unknown"
+
+                    val mins = s.kilowatts?.let {
+                        KonaChargeCurve.simulate(
+                            stop.arrivalSocPercent.toFloat(), stop.departureSocPercent.toFloat(),
+                            it, null, profile = CarProfile.KONA_LR
+                        ).chargeMinutes
+                    }
+                    val costText = buildConnectorCostText(charger, stop, s)
+                    val line2 = listOfNotNull(
+                        costText.takeIf { it.isNotEmpty() },
+                        mins?.let { formatChargeMins(it) }
+                    ).joinToString(" · ")
+
+                    listBuilder.addItem(
+                        Row.Builder()
+                            .setTitle(title)
+                            .apply {
+                                if (line1.isNotEmpty()) addText(line1)
+                                if (line2.isNotEmpty()) addText(line2)
+                            }
+                            .build()
+                    )
+                }
+
+                val builder = ListTemplate.Builder()
+                    .setTitle(charger.name)
+                    .setHeaderAction(Action.BACK)
+                    .setSingleList(listBuilder.build())
+
+                if (charger.pk != stop.activePk) {
+                    val starIcon = CarIcon.Builder(
+                        IconCompat.createWithResource(carContext, R.drawable.ic_car_star)
+                    ).build()
+                    builder.addAction(
+                        Action.Builder()
+                            .setIcon(starIcon)
+                            .setBackgroundColor(CarColor.PRIMARY)
+                            .setOnClickListener {
+                                saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(charger.pk)))
+                                screenManager.pop()
+                            }
+                            .build()
+                    )
+                }
+
+                return builder.build()
+            }
+        }
 
     private fun paramPickerScreen(
         title: String,
