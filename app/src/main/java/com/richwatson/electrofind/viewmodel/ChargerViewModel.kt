@@ -586,6 +586,15 @@ class ChargerViewModel(
         _state.update { it.copy(trips = trips) }
     }
 
+    fun moveTrip(fromIndex: Int, toIndex: Int) {
+        val trips = _state.value.trips.toMutableList()
+        if (fromIndex == toIndex || fromIndex !in trips.indices || toIndex !in trips.indices) return
+        val item = trips.removeAt(fromIndex)
+        trips.add(toIndex, item)
+        saveTrips(trips)
+        _state.update { it.copy(trips = trips) }
+    }
+
     fun copyStopToTrip(stopId: String, targetTripId: String) {
         val source = _state.value.trips.flatMap { it.stops }.find { it.id == stopId } ?: return
         val copy = source.copy(id = java.util.UUID.randomUUID().toString())

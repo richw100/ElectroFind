@@ -134,7 +134,8 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
                     activeTripId = activeTrip?.id,
                     onSelect = { chargerViewModel.setActiveTripId(it) },
                     onAddTrip = { chargerViewModel.addTrip("Trip ${trips.size + 1}") },
-                    onTapActive = { renameTripId = activeTrip?.id }
+                    onTapActive = { renameTripId = activeTrip?.id },
+                    onMoveTrip = { from, to -> chargerViewModel.moveTrip(from, to) }
                 )
                 Row(
                     modifier = Modifier
@@ -323,27 +324,42 @@ private fun TripTabRow(
     activeTripId: String?,
     onSelect: (String) -> Unit,
     onAddTrip: () -> Unit,
-    onTapActive: () -> Unit
+    onTapActive: () -> Unit,
+    onMoveTrip: (fromIndex: Int, toIndex: Int) -> Unit
 ) {
+    val listState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+        onMoveTrip(from.index, to.index)
+    }
     LazyRow(
+        state = listState,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        items(trips, key = { it.id }) { trip ->
-            val isActive = trip.id == activeTripId
-            FilterChip(
-                selected = isActive,
-                onClick = { if (isActive) onTapActive() else onSelect(trip.id) },
-                label = {
-                    val stopCount = trip.stops.size
-                    Text(
-                        if (stopCount > 0) "${trip.name} ($stopCount)" else trip.name,
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                }
-            )
+        itemsIndexed(trips, key = { _, trip -> trip.id }) { _, trip ->
+            ReorderableItem(reorderState, key = trip.id) { isDragging ->
+                val elevation by animateDpAsState(
+                    targetValue = if (isDragging) 6.dp else 0.dp,
+                    label = "trip-chip-drag-elevation"
+                )
+                val isActive = trip.id == activeTripId
+                FilterChip(
+                    selected = isActive,
+                    onClick = { if (isActive) onTapActive() else onSelect(trip.id) },
+                    label = {
+                        val stopCount = trip.stops.size
+                        Text(
+                            if (stopCount > 0) "${trip.name} ($stopCount)" else trip.name,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    modifier = Modifier
+                        .shadow(elevation, shape = FilterChipDefaults.shape)
+                        .longPressDraggableHandle()
+                )
+            }
         }
         item {
             AssistChip(
