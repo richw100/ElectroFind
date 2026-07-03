@@ -84,6 +84,7 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
+import com.richwatson.electrofind.ui.staleWarningPrefixed
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
@@ -825,7 +826,7 @@ fun ChargerMapView(
     dialogCharger?.let { charger ->
         AlertDialog(
             onDismissRequest = { dialogChargerPk = null },
-            title = { Text((if (isStaleForRefresh(charger.cachedAt, refreshPeriodMs)) "! " else "") + charger.name) },
+            title = { Text(staleWarningPrefixed(charger.name, isStaleForRefresh(charger.cachedAt, refreshPeriodMs))) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(

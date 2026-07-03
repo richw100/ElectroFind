@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
+import com.richwatson.electrofind.ui.staleWarningPrefixed
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
@@ -498,7 +499,7 @@ private fun ChargerCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        (if (isStaleForRefresh(charger.cachedAt, refreshPeriodMs)) "! " else "") + charger.name,
+                        staleWarningPrefixed(charger.name, isStaleForRefresh(charger.cachedAt, refreshPeriodMs)),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )

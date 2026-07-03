@@ -81,6 +81,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
+import com.richwatson.electrofind.ui.staleWarningPrefixed
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
@@ -615,9 +616,9 @@ private fun RouteStopCard(
                                 onClick = { onSetActive(idx) },
                                 label = {
                                     val altCharger = allChargers[pk]
-                                    val altWarn = if (altCharger != null && isStaleForRefresh(altCharger.cachedAt, refreshPeriodMs)) "! " else ""
+                                    val altIsStale = altCharger != null && isStaleForRefresh(altCharger.cachedAt, refreshPeriodMs)
                                     Text(
-                                        altWarn + (altCharger?.name?.take(16) ?: "Stop $idx"),
+                                        staleWarningPrefixed(altCharger?.name?.take(16) ?: "Stop $idx", altIsStale),
                                         style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1
                                     )
@@ -652,7 +653,7 @@ private fun RouteStopCard(
             } else {
                 // Charger name + operator
                 Text(
-                    (if (isStaleForRefresh(charger.cachedAt, refreshPeriodMs)) "! " else "") + charger.name,
+                    staleWarningPrefixed(charger.name, isStaleForRefresh(charger.cachedAt, refreshPeriodMs)),
                     style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium
                 )
                 Text(

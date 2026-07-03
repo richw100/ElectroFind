@@ -476,10 +476,14 @@ class ChargerViewModel(
     private fun loadRouteChargers(pks: Set<Long>) {
         if (pks.isEmpty()) return
         viewModelScope.launch {
+            // getChargersByPks() can return chargers straight from the Room cache without
+            // hitting the network, so it must NOT claim routeChargersRefreshedAt = now — that
+            // banner should only reflect an actual refresh (see refreshRouteChargers()),
+            // otherwise it can say "Updated just now" while every charger still shows the
+            // stale-data "!" warning because the underlying cache entries are genuinely old.
             val chargers = repository.getChargersByPks(pks)
             _state.update { s -> s.copy(
-                routeChargers = s.routeChargers + chargers.associateBy { it.pk },
-                routeChargersRefreshedAt = System.currentTimeMillis()
+                routeChargers = s.routeChargers + chargers.associateBy { it.pk }
             ) }
         }
     }
