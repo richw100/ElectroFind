@@ -19,6 +19,7 @@ import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.R
 import com.richwatson.electrofind.ElectroFindApp
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.preferences.AppPreferences
@@ -152,10 +153,12 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
         val listBuilder = ItemList.Builder()
         trips.forEach { trip ->
             val stopCount = trip.stops.size
-            val firstName = trip.stops.firstOrNull()?.let { chargerMap[it.activePk]?.name } ?: ""
+            val firstCharger = trip.stops.firstOrNull()?.let { chargerMap[it.activePk] }
+            val firstName = firstCharger?.name ?: ""
+            val firstWarn = if (firstCharger != null && isStaleForRefresh(firstCharger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
             val subtitle = buildString {
                 append("$stopCount stop${if (stopCount != 1) "s" else ""}")
-                if (firstName.isNotEmpty()) append(" · $firstName…")
+                if (firstName.isNotEmpty()) append(" · $firstWarn$firstName…")
             }
             listBuilder.addItem(
                 Row.Builder()
@@ -207,7 +210,8 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
                 rowBuilder.addText("Loading…")
             } else {
                 val (line1, line2) = charger.chargerDetailLines(stop)
-                rowBuilder.addText(if (line1.isNotEmpty()) "${charger.name} · $line1" else charger.name)
+                val warn = if (isStaleForRefresh(charger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
+                rowBuilder.addText(if (line1.isNotEmpty()) "$warn${charger.name} · $line1" else "$warn${charger.name}")
                 if (line2.isNotEmpty()) rowBuilder.addText(line2)
                 val lat = charger.coordinates.latitude
                 val lng = charger.coordinates.longitude

@@ -83,6 +83,7 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.timeAgo
+import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
@@ -205,6 +206,7 @@ fun BrowseMapScreen(
                 onAddAlternativeToStop = { stopId, pk -> chargerViewModel.addAlternativeToStop(stopId, pk) },
                 onAddTrip = { name -> chargerViewModel.addTrip(name) },
                 customChargerPks = state.customChargers.map { it.pk }.toSet(),
+                refreshPeriodMs = state.refreshPeriodMs,
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -478,6 +480,7 @@ fun ResultsMapScreen(
                 onAddAlternativeToStop = { stopId, pk -> chargerViewModel.addAlternativeToStop(stopId, pk) },
                 onAddTrip = { name -> chargerViewModel.addTrip(name) },
                 customChargerPks = state.customChargers.map { it.pk }.toSet(),
+                refreshPeriodMs = state.refreshPeriodMs,
                 modifier = Modifier.fillMaxSize(),
                 onMapPositionSaved = { zoom, lat, lng ->
                     chargerViewModel.saveMapPosition(zoom, lat, lng)
@@ -525,6 +528,7 @@ fun ChargerMapView(
     onAddAlternativeToStop: (String, Long) -> Unit = { _, _ -> },
     onAddTrip: (String) -> String = { "" },
     customChargerPks: Set<Long> = emptySet(),
+    refreshPeriodMs: Long = 60_000L,
     modifier: Modifier = Modifier,
     onMapPositionSaved: (zoom: Double, lat: Double, lng: Double) -> Unit = { _, _, _ -> },
     onMapTapped: () -> Unit = {},
@@ -707,9 +711,10 @@ fun ChargerMapView(
                 }
             }
 
+            val markerIsStale = isStaleForRefresh(charger.cachedAt, refreshPeriodMs)
             val marker = Marker(mapView).apply {
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
-                title = charger.name
+                title = (if (markerIsStale) "! " else "") + charger.name
                 snippet = buildString {
                     charger.pricePerKwh?.let { append("%s%.2f/kWh · ".format(currencySymbol, it)) }
                     append(charger.operator.name)
@@ -721,7 +726,7 @@ fun ChargerMapView(
                     append(" · $statusText")
                 }
                 icon = priceBadgeDrawable(
-                    context, charger.pricePerKwh, charger.isStale,
+                    context, charger.pricePerKwh, charger.isStale || markerIsStale,
                     currencySymbol = currencySymbol,
                     labelOverride = badgeLabel,
                     isSelected = charger.pk == selectedChargerPk,
@@ -816,7 +821,7 @@ fun ChargerMapView(
     dialogCharger?.let { charger ->
         AlertDialog(
             onDismissRequest = { dialogChargerPk = null },
-            title = { Text(charger.name) },
+            title = { Text((if (isStaleForRefresh(charger.cachedAt, refreshPeriodMs)) "! " else "") + charger.name) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(

@@ -23,7 +23,7 @@ import com.richwatson.electrofind.R
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.preferences.AppPreferences
-import com.richwatson.electrofind.api.models.timeAgo
+import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.db.CachedChargerEntity
 import com.richwatson.electrofind.work.RefreshChargersWorker
 import androidx.car.app.constraints.ConstraintManager
@@ -32,8 +32,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 class StopDetailScreen(
@@ -48,9 +46,7 @@ class StopDetailScreen(
     private val gson = Gson()
 
     private var chargerMap: Map<Long, ChargingLocation> = initialChargerMap
-    private var lastRefreshed: String? = null
     private var chargerPage: Int = 0
-    private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
     // Room's table-level invalidation re-emits observeByPks() for ANY write to
     // cached_chargers, not just ones affecting our PKs — skip re-parsing JSON that hasn't changed.
     private val parsedCache = mutableMapOf<Long, Pair<String, ChargingLocation>>()
@@ -94,18 +90,19 @@ class StopDetailScreen(
                 dlog("db observe emit: entities=${entities.size} fresh=${fresh.size} pksBefore=${chargerMap.keys}")
                 if (fresh.isNotEmpty()) {
                     chargerMap = chargerMap + fresh.associateBy { it.pk }
-                    lastRefreshed = LocalTime.now().format(timeFmt)
                     dlog("db observe -> invalidate() chargerMapSize=${chargerMap.size}")
                     invalidate()
                 }
             }
         }
 
-        // Re-enqueue every 60s so availability stays current while the screen is open
+        // Re-enqueue periodically so availability stays current while the screen is open.
+        // Reads prefs.refreshPeriodMs fresh each iteration (not hoisted to a val) so a change
+        // made via the edit menu's "Refresh period" picker takes effect on the next cycle.
         lifecycleScope.launch {
             while (isActive) {
-                delay(60_000)
-                dlog("periodic 60s re-enqueue")
+                delay(prefs.refreshPeriodMs)
+                dlog("periodic re-enqueue")
                 RefreshChargersWorker.enqueue(carContext, stop.chargerPks.toSet())
             }
         }
@@ -139,17 +136,15 @@ class StopDetailScreen(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_navigate)
         ).build()
 
-        val updatedSuffix = when {
-            lastRefreshed != null -> " · Updated $lastRefreshed"
-            activeCharger.cachedAt > 0L -> " · Data: ${timeAgo(activeCharger.cachedAt)}"
-            else -> ""
-        }
         val editFab = Action.Builder()
             .setIcon(editIcon)
             .setBackgroundColor(CarColor.PRIMARY)
             .setOnClickListener { screenManager.push(editMenuScreen()) }
             .build()
-        val baseTitle = stop.displayName(stop.chargerPks.indexOf(stop.activePk)) + updatedSuffix
+        // Must stay identical across every background-triggered invalidate() — the Car App
+        // host only treats a template rebuild as a free "refresh" (not counting against the
+        // task flow's step quota) if the title is unchanged from the previous one.
+        val baseTitle = stop.displayName(stop.chargerPks.indexOf(stop.activePk))
 
         val maxItems = carContext.getCarService(ConstraintManager::class.java)
             .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
@@ -225,9 +220,10 @@ class StopDetailScreen(
         val lat = charger.coordinates.latitude
         val lng = charger.coordinates.longitude
         val mapsUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
+        val warn = if (isStaleForRefresh(charger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
 
         return Row.Builder()
-            .setTitle("$prefix${charger.name}")
+            .setTitle("$warn$prefix${charger.name}")
             .apply {
                 if (line1.isNotEmpty()) addText(line1)
                 if (line2.isNotEmpty()) addText(line2)
@@ -407,6 +403,18 @@ class StopDetailScreen(
                                 screenManager.push(arrivalTimePickerScreen(stop.arrivalTimeMinutes) { value ->
                                     saveStop(stop.copy(arrivalTimeMinutes = value))
                                 })
+                            }
+                            .build()
+                    )
+                    .addItem(
+                        Row.Builder()
+                            .setTitle("Refresh period (currently ${prefs.refreshPeriodMs / 60_000L} min)")
+                            .setOnClickListener {
+                                screenManager.push(paramPickerScreen(
+                                    "Refresh period",
+                                    listOf(1, 2, 5, 10, 15, 30).map { "$it min" to it },
+                                    (prefs.refreshPeriodMs / 60_000L).toInt()
+                                ) { value -> prefs.refreshPeriodMs = value * 60_000L; invalidate() })
                             }
                             .build()
                     )

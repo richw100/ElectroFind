@@ -36,6 +36,7 @@ import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.timeAgo
+import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
@@ -164,6 +165,7 @@ fun ResultsScreen(
                             currencySymbol = state.currencySymbol,
                             session = ChargeSession(state.startSocPercent, state.targetSocPercent, state.stayMinutes, state.activeProfile),
                             distanceMiles = distanceMiles,
+                            refreshPeriodMs = state.refreshPeriodMs,
                             onShowOnMap = { onShowOnMap(charger) },
                             isFavourite = charger.pk in state.favouritePks,
                             isExcluded = charger.pk in state.excludedPks,
@@ -475,6 +477,7 @@ private fun ChargerCard(
     currencySymbol: String = "€",
     session: ChargeSession? = null,
     distanceMiles: Double? = null,
+    refreshPeriodMs: Long = 60_000L,
     onShowOnMap: (() -> Unit)? = null,
     isFavourite: Boolean = false,
     isExcluded: Boolean = false,
@@ -495,7 +498,7 @@ private fun ChargerCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        charger.name,
+                        (if (isStaleForRefresh(charger.cachedAt, refreshPeriodMs)) "! " else "") + charger.name,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )

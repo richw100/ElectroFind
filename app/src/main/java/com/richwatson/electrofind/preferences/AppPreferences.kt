@@ -43,6 +43,10 @@ class AppPreferences(context: Context) {
         get() = prefs.getInt("stay_minutes", 30)
         set(value) { prefs.edit().putInt("stay_minutes", value).apply() }
 
+    var refreshPeriodMs: Long
+        get() = prefs.getLong("refresh_period_ms", 60_000L)
+        set(value) { prefs.edit().putLong("refresh_period_ms", value).apply() }
+
     var activeProfileId: String
         get() = prefs.getString("active_profile_id", CarProfile.KONA_LR_ID) ?: CarProfile.KONA_LR_ID
         set(value) { prefs.edit().putString("active_profile_id", value).apply() }

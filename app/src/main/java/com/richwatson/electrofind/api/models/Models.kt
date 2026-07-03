@@ -186,6 +186,12 @@ fun timeAgo(cachedAt: Long): String? {
     }
 }
 
+// Distinct from ChargingLocation.isStale (a long-horizon "is this cache entry
+// ancient" check) — this flags data that hasn't been refreshed within the last
+// two expected refresh cycles, a much tighter, refresh-cadence-relative signal.
+fun isStaleForRefresh(cachedAt: Long, refreshPeriodMs: Long): Boolean =
+    cachedAt > 0L && System.currentTimeMillis() - cachedAt > 2 * refreshPeriodMs
+
 data class Coordinates(val longitude: Double, val latitude: Double)
 
 data class Operator(

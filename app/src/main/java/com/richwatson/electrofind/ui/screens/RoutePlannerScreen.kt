@@ -80,6 +80,7 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.timeAgo
+import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
@@ -203,6 +204,7 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
                             charger = charger,
                             currencySymbol = state.currencySymbol,
                             allChargers = state.routeChargers,
+                            refreshPeriodMs = state.refreshPeriodMs,
                             onMoveUp = { chargerViewModel.moveRouteStop(stop.id, -1) },
                             onMoveDown = { chargerViewModel.moveRouteStop(stop.id, +1) },
                             onRemove = {
@@ -511,6 +513,7 @@ private fun RouteStopCard(
     charger: ChargingLocation?,
     currencySymbol: String,
     allChargers: Map<Long, ChargingLocation>,
+    refreshPeriodMs: Long = 60_000L,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onRemove: () -> Unit,
@@ -611,8 +614,10 @@ private fun RouteStopCard(
                                 selected = idx == stop.activeIndex,
                                 onClick = { onSetActive(idx) },
                                 label = {
+                                    val altCharger = allChargers[pk]
+                                    val altWarn = if (altCharger != null && isStaleForRefresh(altCharger.cachedAt, refreshPeriodMs)) "! " else ""
                                     Text(
-                                        allChargers[pk]?.name?.take(16) ?: "Stop $idx",
+                                        altWarn + (altCharger?.name?.take(16) ?: "Stop $idx"),
                                         style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1
                                     )
@@ -646,7 +651,10 @@ private fun RouteStopCard(
                 )
             } else {
                 // Charger name + operator
-                Text(charger.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    (if (isStaleForRefresh(charger.cachedAt, refreshPeriodMs)) "! " else "") + charger.name,
+                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium
+                )
                 Text(
                     "${charger.operator.name} · ${charger.address}, ${charger.city}",
                     style = MaterialTheme.typography.bodySmall,
