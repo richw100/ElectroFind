@@ -48,6 +48,9 @@ import com.richwatson.electrofind.viewmodel.SpeedFilter
 
 data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes: Int, val profile: CarProfile = CarProfile.KONA_LR)
 
+private fun formatDurationMinutes(mins: Int): String =
+    if (mins < 60) "$mins min" else "${mins / 60}h ${"%02d".format(mins % 60)}min"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultsScreen(
@@ -615,7 +618,7 @@ private fun ChargerCard(
                         val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
                         val optMins = optResult.chargeMinutes.toInt()
                         val optSoc = optResult.endSocPercent.toInt()
-                        val optLabel = if (optMins >= 180) "≥3h → ${optSoc}%" else "$optMins min → ${optSoc}%"
+                        val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
                         val staySoc = stayResult.endSocPercent.toInt()
                         val fmt: (Double) -> String = { c -> if (s.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
                         Row(verticalAlignment = Alignment.Top) {
@@ -635,7 +638,7 @@ private fun ChargerCard(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Text(
-                                    "🕐 In ${session.stayMinutes} min → ${staySoc}%  ·  ${fmt(stayCost)}",
+                                    "🕐 In ${formatDurationMinutes(session.stayMinutes)} → ${staySoc}%  ·  ${fmt(stayCost)}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
