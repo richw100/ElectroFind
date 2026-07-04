@@ -1,9 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+// Signing credentials live in local.properties (gitignored) or environment variables,
+// never in this file — it's committed.
+val localProperties = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun signingSecret(name: String): String? =
+    localProperties.getProperty(name) ?: System.getenv(name)
 
 android {
     namespace = "com.richwatson.electrofind"
@@ -24,9 +36,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("../electrofind-release.jks")
-            storePassword = "electrofind123"
+            storePassword = signingSecret("ELECTROFIND_STORE_PASSWORD")
             keyAlias = "electrofind"
-            keyPassword = "electrofind123"
+            keyPassword = signingSecret("ELECTROFIND_KEY_PASSWORD")
         }
     }
 
