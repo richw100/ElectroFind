@@ -223,7 +223,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
         var page = 0
         override fun onGetTemplate(): Template {
             val current = (prefs.refreshPeriodMs / 60_000L).toInt()
-            val rows = listOf(1, 2, 5, 10, 15, 30).map { minutes ->
+            val minuteRows = listOf(1, 2, 5, 10, 15, 30).map { minutes ->
                 Row.Builder()
                     .setTitle(if (minutes == current) "★ $minutes min" else "$minutes min")
                     .setOnClickListener {
@@ -233,6 +233,13 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
                     }
                     .build()
             }
+            // A plain toggle-on-tap row rather than a separate picker — invalidate() on the same
+            // screen doesn't cost a step of the task flow's quota, unlike pushing a new one.
+            val currencyRow = Row.Builder()
+                .setTitle("Show costs in GBP (currently ${if (prefs.convertToGbp) "on" else "off"})")
+                .setOnClickListener { prefs.convertToGbp = !prefs.convertToGbp; invalidate() }
+                .build()
+            val rows = minuteRows + currencyRow
             return carContext.pagedListTemplate("Refresh period", rows, page) { page = it; invalidate() }
         }
     }
@@ -254,7 +261,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             if (charger == null) {
                 rowBuilder.addText("Loading…")
             } else {
-                val (line1, line2) = charger.chargerDetailLines(stop)
+                val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp)
                 val warn = if (isStaleForRefresh(charger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
                 rowBuilder.addText(if (line1.isNotEmpty()) "$warn${charger.name} · $line1" else "$warn${charger.name}")
                 if (line2.isNotEmpty()) rowBuilder.addText(line2)

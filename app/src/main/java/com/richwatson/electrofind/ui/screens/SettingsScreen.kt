@@ -196,6 +196,28 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            Text("Currency", style = MaterialTheme.typography.titleMedium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Show route costs in GBP", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Converts foreign-currency route costs to an approximate £ figure",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.convertToGbp,
+                    onCheckedChange = { chargerViewModel.setConvertToGbp(it) }
+                )
+            }
+
+            HorizontalDivider()
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

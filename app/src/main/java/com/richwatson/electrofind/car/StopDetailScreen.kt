@@ -204,6 +204,12 @@ class StopDetailScreen(
                         (prefs.refreshPeriodMs / 60_000L).toInt()
                     ) { value -> prefs.refreshPeriodMs = value * 60_000L; invalidate() })
                 }
+                .build(),
+            // A plain toggle-on-tap row, not a picker sub-screen — a boolean doesn't need one,
+            // and invalidate() on the same screen doesn't cost a step of the task flow's quota.
+            Row.Builder()
+                .setTitle("Show costs in GBP (currently ${if (prefs.convertToGbp) "on" else "off"})")
+                .setOnClickListener { prefs.convertToGbp = !prefs.convertToGbp; invalidate() }
                 .build()
         )
     }
@@ -218,7 +224,7 @@ class StopDetailScreen(
         onSelect: () -> Unit,
         onMakePrimary: () -> Unit
     ): Row {
-        val (line1, line2) = charger.chargerDetailLines(stop)
+        val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp)
 
         val lat = charger.coordinates.latitude
         val lng = charger.coordinates.longitude
@@ -283,7 +289,7 @@ class StopDetailScreen(
                             it, null, profile = CarProfile.KONA_LR
                         ).chargeMinutes
                     }
-                    val costText = buildConnectorCostText(charger, stop, s)
+                    val costText = buildConnectorCostText(charger, stop, s, prefs.convertToGbp)
                     val line2 = listOfNotNull(
                         costText.takeIf { it.isNotEmpty() },
                         mins?.let { formatChargeMins(it) }

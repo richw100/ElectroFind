@@ -4,12 +4,13 @@ import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.ConnectorPriceSummary
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.util.CurrencyConversion
 import com.richwatson.electrofind.util.KonaChargeCurve
 import kotlin.math.roundToInt
 
 // Shared row-content formatting so every Android Auto screen (trip stop list,
 // charger alternatives list) describes a charger the same way.
-internal fun ChargingLocation.chargerDetailLines(stop: RouteStop): Pair<String, String> {
+internal fun ChargingLocation.chargerDetailLines(stop: RouteStop, convertToGbp: Boolean = false): Pair<String, String> {
     val availByKw = availabilityByKw
 
     val line1 = connectorPriceSummaries
@@ -38,7 +39,7 @@ internal fun ChargingLocation.chargerDetailLines(stop: RouteStop): Pair<String, 
         .distinct()
         .filter { it.isNotEmpty() }
 
-    val costText = buildCostText(this, stop)
+    val costText = buildCostText(this, stop, convertToGbp)
     val line2Parts = mutableListOf<String>()
     if (costText.isNotEmpty()) line2Parts.add(costText)
     if (connectorTypes.isNotEmpty()) line2Parts.add(connectorTypes.joinToString("/"))
@@ -62,23 +63,23 @@ internal fun abbreviateConnectorType(type: String): String = when {
     else -> type.take(6)
 }
 
-internal fun buildCostText(charger: ChargingLocation, stop: RouteStop): String {
+internal fun buildCostText(charger: ChargingLocation, stop: RouteStop, convertToGbp: Boolean = false): String {
     val kw = charger.maxKilowatts ?: return ""
     val price = charger.pricePerKwh ?: return ""
-    return buildCostTextFor(charger, stop, kw, price)
+    return buildCostTextFor(charger, stop, kw, price, convertToGbp)
 }
 
 // Per-connector-tier variant: a charger can have multiple connector speeds priced
 // differently (e.g. 110kW vs 22kW), so the combined buildCostText() above doesn't tell
 // you which price it used — this computes the estimate for one specific tier instead.
-internal fun buildConnectorCostText(charger: ChargingLocation, stop: RouteStop, summary: ConnectorPriceSummary): String {
+internal fun buildConnectorCostText(charger: ChargingLocation, stop: RouteStop, summary: ConnectorPriceSummary, convertToGbp: Boolean = false): String {
     if (summary.isFree) return "FREE"
     val kw = summary.kilowatts ?: return ""
     val price = summary.pricePerKwh ?: return ""
-    return buildCostTextFor(charger, stop, kw, price)
+    return buildCostTextFor(charger, stop, kw, price, convertToGbp)
 }
 
-private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double): String {
+private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double, convertToGbp: Boolean = false): String {
     val connectionFee = charger.connectionFeeMajor ?: 0.0
     val chargingRate = charger.chargingTimeRateMajor ?: 0.0
     val parkingRate = charger.parkingTimeRateMajor ?: 0.0
@@ -101,12 +102,16 @@ private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Dou
         profile = CarProfile.KONA_LR
     )
     val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble(), gracePeriod)
-    val cur = charger.currencySymbol ?: "€"
+    val nativeCur = charger.currencySymbol ?: "€"
+    // "kr" (NOK/SEK/DKK) has no unambiguous rate — see CurrencyConversion — so it's left native.
+    val gbpRate = if (convertToGbp) CurrencyConversion.rateToGbp(nativeCur) else null
+    val cur = if (gbpRate != null) "£" else nativeCur
+    fun conv(amount: Double): Double = if (gbpRate != null) amount * gbpRate else amount
 
     return buildString {
-        append("Opt $cur${"%.2f".format(optCost)} Stay $cur${"%.2f".format(stayCost)}")
-        if (connectionFee > 0) append(" +$cur${"%.2f".format(connectionFee)}")
-        if (chargingRate > 0) append(" +$cur${"%.2f".format(chargingRate)}/m")
-        if (parkingRate > 0) append(" +$cur${"%.2f".format(parkingRate)}/m park")
+        append("Opt $cur${"%.2f".format(conv(optCost))} Stay $cur${"%.2f".format(conv(stayCost))}")
+        if (connectionFee > 0) append(" +$cur${"%.2f".format(conv(connectionFee))}")
+        if (chargingRate > 0) append(" +$cur${"%.2f".format(conv(chargingRate))}/m")
+        if (parkingRate > 0) append(" +$cur${"%.2f".format(conv(parkingRate))}/m park")
     }
 }

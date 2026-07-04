@@ -84,6 +84,7 @@ import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.ui.staleWarningPrefixed
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
+import com.richwatson.electrofind.util.CurrencyConversion
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import java.text.SimpleDateFormat
@@ -208,6 +209,7 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
                             totalStops = stops.size,
                             charger = charger,
                             currencySymbol = charger?.currencySymbol ?: state.currencySymbol,
+                            convertToGbp = state.convertToGbp,
                             allChargers = state.routeChargers,
                             refreshPeriodMs = state.refreshPeriodMs,
                             onMoveUp = { chargerViewModel.moveRouteStop(stop.id, -1) },
@@ -532,6 +534,7 @@ private fun RouteStopCard(
     totalStops: Int,
     charger: ChargingLocation?,
     currencySymbol: String,
+    convertToGbp: Boolean = false,
     allChargers: Map<Long, ChargingLocation>,
     refreshPeriodMs: Long = 60_000L,
     onMoveUp: () -> Unit,
@@ -554,6 +557,12 @@ private fun RouteStopCard(
     var nameText by remember(stop.id) { mutableStateOf(stop.customName ?: "") }
     val contentColor = MaterialTheme.colorScheme.onSurface
     val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    // Only convert when we have a known rate for this charger's native symbol — e.g. "kr" is
+    // ambiguous between NOK/SEK/DKK, so it's left in its native currency rather than guessed.
+    val gbpRate = if (convertToGbp) CurrencyConversion.rateToGbp(currencySymbol) else null
+    val displaySymbol = if (gbpRate != null) "£" else currencySymbol
+    fun conv(amount: Double): Double = if (gbpRate != null) amount * gbpRate else amount
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -690,7 +699,7 @@ private fun RouteStopCard(
                     } ?: ""
                     val priceLabel = when {
                         summary.isFree -> "Free"
-                        summary.pricePerKwh != null -> "%s%.2f/kWh".format(currencySymbol, summary.pricePerKwh)
+                        summary.pricePerKwh != null -> "%s%.2f/kWh".format(displaySymbol, conv(summary.pricePerKwh))
                         else -> "—"
                     }
                     Row(Modifier.fillMaxWidth()) {
@@ -702,9 +711,9 @@ private fun RouteStopCard(
 
                 // Time-based charges (charger-level, shown once below connector rows)
                 val ratesParts = listOfNotNull(
-                    charger.connectionFeeMajor?.let { "${currencySymbol}${"%.2f".format(it)} connection fee" },
-                    charger.chargingTimeRateMajor?.let { "${currencySymbol}${"%.2f".format(it)}/min charging" },
-                    charger.parkingTimeRateMajor?.let { "${currencySymbol}${"%.2f".format(it)}/min parking" }
+                    charger.connectionFeeMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))} connection fee" },
+                    charger.chargingTimeRateMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))}/min charging" },
+                    charger.parkingTimeRateMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))}/min parking" }
                 )
                 if (ratesParts.isNotEmpty()) {
                     Text(
@@ -750,7 +759,7 @@ private fun RouteStopCard(
                             val optSoc = optResult.endSocPercent.toInt()
                             val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
                             val staySoc = stayResult.endSocPercent.toInt()
-                            val fmt: (Double) -> String = { c -> if (pg.isFree) "FREE" else "$currencySymbol${"%.2f".format(c)}" }
+                            val fmt: (Double) -> String = { c -> if (pg.isFree) "FREE" else "$displaySymbol${"%.2f".format(conv(c))}" }
                             Text("⚡ Optimal: $optLabel  ·  ${fmt(optCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             Text("🕐 In ${formatDurationMinutes(session.stayMinutes)} → ${staySoc}%  ·  ${fmt(stayCost)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }

@@ -82,7 +82,8 @@ data class SearchState(
     val routeChargers: Map<Long, ChargingLocation> = emptyMap(),
     val routeChargersRefreshedAt: Long? = null,
     val customChargers: List<ChargingLocation> = emptyList(),
-    val rawCustomChargers: List<CustomCharger> = emptyList()
+    val rawCustomChargers: List<CustomCharger> = emptyList(),
+    val convertToGbp: Boolean = false
 ) {
     val isLoading: Boolean get() = isLoadingEv
     val routeStops: List<RouteStop>
@@ -131,7 +132,8 @@ class ChargerViewModel(
                 profiles = allProfiles,
                 activeProfile = activeProfile,
                 favouritePks = appPreferences.favouritePks,
-                excludedPks = appPreferences.excludedPks
+                excludedPks = appPreferences.excludedPks,
+                convertToGbp = appPreferences.convertToGbp
             )
         }
         loadFavouriteChargers(appPreferences.favouritePks)
@@ -309,6 +311,11 @@ class ChargerViewModel(
     fun setThemeMode(mode: ThemeMode) {
         appPreferences.themeMode = mode
         _state.update { it.copy(themeMode = mode) }
+    }
+
+    fun setConvertToGbp(enabled: Boolean) {
+        appPreferences.convertToGbp = enabled
+        _state.update { it.copy(convertToGbp = enabled) }
     }
 
     fun saveMapPosition(zoom: Double, lat: Double, lng: Double) {

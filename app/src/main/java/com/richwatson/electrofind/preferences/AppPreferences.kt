@@ -76,4 +76,8 @@ class AppPreferences(context: Context) {
     var rawTrips: String
         get() = prefs.getString("trips", "[]") ?: "[]"
         set(value) { prefs.edit().putString("trips", value).apply() }
+
+    var convertToGbp: Boolean
+        get() = prefs.getBoolean("convert_to_gbp", false)
+        set(value) { prefs.edit().putBoolean("convert_to_gbp", value).apply() }
 }
