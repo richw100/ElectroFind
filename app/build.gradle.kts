@@ -93,6 +93,9 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
+    // Encrypted storage for session tokens
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // Networking
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")

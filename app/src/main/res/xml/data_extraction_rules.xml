@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 31+ equivalent of backup_rules.xml — keep the two in sync. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="secure_prefs.xml" />
+        <exclude domain="sharedpref" path="electrofind_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="secure_prefs.xml" />
+        <exclude domain="sharedpref" path="electrofind_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Session tokens must not leave the device: the encrypted prefs file is useless without
+     the device-bound Keystore master key, and the legacy plain file held raw tokens. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secure_prefs.xml" />
+    <exclude domain="sharedpref" path="electrofind_prefs.xml" />
+</full-backup-content>
