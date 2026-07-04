@@ -68,8 +68,16 @@ class MainActivity : ComponentActivity() {
             ElectroFindTheme(themeMode = state.themeMode) {
                 val navController = rememberNavController()
                 val isLoggedIn by authViewModel.isLoggedIn.collectAsState()
+                val sessionExpired by authViewModel.sessionExpired.collectAsState()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
+
+                // Session expiry can happen anywhere in the app — send the user back to login
+                LaunchedEffect(isLoggedIn) {
+                    if (!isLoggedIn && navController.currentDestination?.route != "login") {
+                        navController.navigate("login") { popUpTo(0) { inclusive = true } }
+                    }
+                }
 
                 val hasResults = state.chargers.isNotEmpty()
                 val secondaryScreens = setOf("login")
@@ -168,7 +176,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize().padding(innerPadding)
                     ) {
                         composable("login") {
-                            LoginScreen(authViewModel)
+                            LoginScreen(authViewModel, sessionExpired = sessionExpired)
                             LaunchedEffect(isLoggedIn) {
                                 if (isLoggedIn) {
                                     navController.navigate("search") {

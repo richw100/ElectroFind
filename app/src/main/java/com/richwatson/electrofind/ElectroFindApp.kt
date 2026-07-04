@@ -22,7 +22,7 @@ class ElectroFindApp : Application() {
         tokenManager = TokenManager(this)
         val service = ApiClient.buildService(tokenManager)
         val db = AppDatabase.getInstance(this)
-        repository = ChargerRepository(service, this, db.chargerDao())
+        repository = ChargerRepository(service, this, db.chargerDao(), tokenManager)
         appPreferences = AppPreferences(this)
         carProfileRepository = CarProfileRepository(this)
 

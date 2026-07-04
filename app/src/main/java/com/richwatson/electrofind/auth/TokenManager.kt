@@ -5,9 +5,22 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 class TokenManager(context: Context) {
     private val prefs: SharedPreferences = createPrefs(context)
+
+    // Emitted when the API rejects our credentials (HTTP 401 or an expired-token GraphQL
+    // error) so the UI can send the user back to the login screen instead of silently
+    // showing empty results.
+    private val _authFailures = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val authFailures: SharedFlow<Unit> = _authFailures.asSharedFlow()
+
+    fun notifyAuthFailure() {
+        if (isLoggedIn) _authFailures.tryEmit(Unit)
+    }
 
     // Tokens are stored in Keystore-encrypted prefs. The encrypted file is also excluded
     // from backups (res/xml/backup_rules.xml) — its master key lives in the device Keystore

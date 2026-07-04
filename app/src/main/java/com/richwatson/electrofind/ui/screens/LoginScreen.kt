@@ -9,21 +9,28 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.richwatson.electrofind.viewmodel.AuthViewModel
 
 private const val TAG = "LoginScreen"
 
 @Composable
-fun LoginScreen(authViewModel: AuthViewModel) {
+fun LoginScreen(authViewModel: AuthViewModel, sessionExpired: Boolean = false) {
     // When non-null, this WebView is shown as a full-screen overlay for OAuth popups
     var popupWebView by remember { mutableStateOf<WebView?>(null) }
 
@@ -76,6 +83,17 @@ fun LoginScreen(authViewModel: AuthViewModel) {
     }
 
     Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+        if (sessionExpired) {
+            Surface(color = MaterialTheme.colorScheme.errorContainer) {
+                Text(
+                    "Session expired — please log in again",
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -127,6 +145,7 @@ fun LoginScreen(authViewModel: AuthViewModel) {
                 }
             }
         )
+        }
 
         // Show OAuth popup WebView as a full-screen overlay when active
         popupWebView?.let { popup ->

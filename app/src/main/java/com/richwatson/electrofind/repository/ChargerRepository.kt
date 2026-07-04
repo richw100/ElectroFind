@@ -7,6 +7,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.api.ElectroverseService
+import com.richwatson.electrofind.auth.TokenManager
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.ChargingLocationWrapper
 import com.richwatson.electrofind.api.models.GraphQLRequest
@@ -39,7 +40,8 @@ import java.util.concurrent.TimeUnit
 class ChargerRepository(
     private val service: ElectroverseService,
     private val context: Context,
-    private val dao: ChargerDao
+    private val dao: ChargerDao,
+    private val tokenManager: TokenManager
 ) {
     private val gson = Gson()
     private val TAG = "ChargerRepository"
@@ -291,6 +293,7 @@ class ChargerRepository(
         try {
             val response = service.getLocationTile(zoom, x, y, true, socketGroups)
             if (!response.isSuccessful) {
+                if (response.code() == 401) tokenManager.notifyAuthFailure()
                 Log.w(TAG, "Tile $zoom/$x/$y returned HTTP ${response.code()}")
                 return@withContext emptyList()
             }
@@ -462,19 +465,28 @@ class ChargerRepository(
             )
             val response = service.graphQL(request)
             if (!response.isSuccessful) {
+                if (response.code() == 401) tokenManager.notifyAuthFailure()
                 Log.w(TAG, "GraphQL chargingLocation $pk returned HTTP ${response.code()}")
                 return@withContext null
             }
             val body = response.body()?.string() ?: return@withContext null
             val type = object : TypeToken<GraphQLResponse<ChargingLocationWrapper>>() {}.type
             val parsed: GraphQLResponse<ChargingLocationWrapper> = gson.fromJson(body, type)
-            parsed.errors?.firstOrNull()?.let { Log.w(TAG, "GraphQL error for pk $pk: ${it.message}") }
+            parsed.errors?.firstOrNull()?.let {
+                Log.w(TAG, "GraphQL error for pk $pk: ${it.message}")
+                if (looksLikeAuthError(it.message)) tokenManager.notifyAuthFailure()
+            }
             parsed.data?.chargingLocation
         } catch (e: Exception) {
             Log.e(TAG, "fetchChargingLocation($pk) failed", e)
             null
         }
     }
+
+    // The GraphQL proxy can reject an expired token with HTTP 200 + an errors array,
+    // so the status code alone isn't enough.
+    private fun looksLikeAuthError(message: String): Boolean =
+        listOf("expired", "authenticat", "credentials").any { message.contains(it, ignoreCase = true) }
 
     private fun distanceMiles(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val R = 3958.8 // Earth radius in miles
