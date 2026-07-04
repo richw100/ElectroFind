@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
@@ -300,7 +301,7 @@ fun BrowseMapScreen(
                     if (suggestionsExpanded && suggestions.isNotEmpty()) {
                         HorizontalDivider()
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(suggestions, key = { it }) { suggestion ->
+                            itemsIndexed(suggestions, key = { index, s -> "${index}_${s.displayName}_${s.lat}_${s.lng}" }) { _, suggestion ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
@@ -349,7 +350,7 @@ fun BrowseMapScreen(
                     } else if (fieldFocused && searchText.isEmpty() && state.searchHistory.isNotEmpty()) {
                         HorizontalDivider()
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                            items(state.searchHistory, key = { it }) { entry ->
+                            itemsIndexed(state.searchHistory, key = { index, entry -> "${index}_${entry.label}" }) { _, entry ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
