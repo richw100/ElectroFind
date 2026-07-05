@@ -79,6 +79,7 @@ data class SearchState(
     val excludedPks: Set<Long> = emptySet(),
     val showOnlyFavourites: Boolean = false,
     val hideExcluded: Boolean = false,
+    val alwaysShowFavourites: Boolean = false,
     val favouriteChargers: List<ChargingLocation> = emptyList(),
     val trips: List<Trip> = emptyList(),
     val activeTripId: String? = null,
@@ -165,6 +166,11 @@ class ChargerViewModel(
         val stayCosts: Map<Long, Double?> =
             if (needsStayCost) source.associate { it.pk to it.simCost(s, s.stayMinutes.toDouble()) } else emptyMap()
 
+        // Favourites (and custom chargers, pk < 0) can be pinned past every filter below;
+        // they rejoin the list before sorting so they still land in the right order.
+        val pinned = if (s.alwaysShowFavourites)
+            source.filter { it.pk in s.favouritePks || it.pk < 0 } else emptyList()
+
         var list = source
         if (s.hideExcluded) list = list.filter { it.pk !in s.excludedPks }
         list = when (s.speedFilter) {
@@ -191,6 +197,10 @@ class ChargerViewModel(
         s.maxOptimalCost?.let { max -> list = list.filter { charger -> (optimalCosts[charger.pk] ?: Double.MAX_VALUE) <= max } }
         s.minStayCost?.let { min -> list = list.filter { charger -> (stayCosts[charger.pk] ?: 0.0) >= min } }
         s.maxStayCost?.let { max -> list = list.filter { charger -> (stayCosts[charger.pk] ?: Double.MAX_VALUE) <= max } }
+        if (pinned.isNotEmpty()) {
+            val kept = list.map { it.pk }.toSet()
+            list = list + pinned.filter { it.pk !in kept }
+        }
         list = when (s.sortOrder) {
             SortOrder.PRICE_ASC -> list.sortedBy { it.pricePerKwh ?: Double.MAX_VALUE }
             SortOrder.PRICE_DESC -> list.sortedByDescending { it.pricePerKwh ?: -1.0 }
@@ -406,6 +416,10 @@ class ChargerViewModel(
 
     fun setHideExcluded(on: Boolean) {
         _state.update { it.copy(hideExcluded = on) }
+    }
+
+    fun setAlwaysShowFavourites(on: Boolean) {
+        _state.update { it.copy(alwaysShowFavourites = on) }
     }
 
     fun toggleConnectorFilter(connector: String) {

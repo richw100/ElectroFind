@@ -408,7 +408,8 @@ fun ResultsMapScreen(
         val results = chargerViewModel.filteredSortedChargers
         val routeByPk = state.routeChargers
         val resultPks = results.map { it.pk }.toSet()
-        val extraFavourites = state.favouriteChargers.filter { it.pk !in resultPks }
+        // Respects filters and the "always show favourites" toggle, unlike raw state.favouriteChargers
+        val extraFavourites = chargerViewModel.filteredSortedFavouriteChargers.filter { it.pk !in resultPks }
         val knownPks = resultPks + extraFavourites.map { it.pk }.toSet()
         val routeOnly = routeByPk.values.filter { it.pk !in knownPks }
         // Prefer freshly-refreshed route charger data over stale search results

@@ -317,7 +317,10 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true, modifier:
     }
 
     Column(modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState())
+        ) {
             FilterChip(
                 selected = state.showOnlyFavourites,
                 onClick = { vm.setShowOnlyFavourites(!state.showOnlyFavourites) },
@@ -329,6 +332,12 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true, modifier:
                 onClick = { vm.setHideExcluded(!state.hideExcluded) },
                 leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp)) },
                 label = { Text("Hide excluded") }
+            )
+            FilterChip(
+                selected = state.alwaysShowFavourites,
+                onClick = { vm.setAlwaysShowFavourites(!state.alwaysShowFavourites) },
+                leadingIcon = { Icon(Icons.Default.FavoriteBorder, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text("Favourites ignore filters") }
             )
         }
         Spacer(Modifier.height(6.dp))
