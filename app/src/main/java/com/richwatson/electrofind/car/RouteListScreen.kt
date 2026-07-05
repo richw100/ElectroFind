@@ -28,6 +28,7 @@ import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.ChargerRepository
 import android.content.pm.PackageManager
 import android.util.Log
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
@@ -47,11 +48,18 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
     // cached_chargers, not just ones affecting our PKs — skip re-parsing JSON that hasn't changed.
     private val parsedCache = mutableMapOf<Long, Pair<String, ChargingLocation>>()
 
+    // loadData() is re-run by every Refresh tap; without cancelling the previous
+    // launches, the infinite Room collector below stacks up one copy per tap.
+    private var loadJob: Job? = null
+    private var observeJob: Job? = null
+
     init {
         loadData()
     }
 
     private fun loadData() {
+        loadJob?.cancel()
+        observeJob?.cancel()
         trips = loadTrips()
 
         if (trips.isEmpty()) {
@@ -60,7 +68,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             return
         }
 
-        lifecycleScope.launch {
+        loadJob = lifecycleScope.launch {
             val allPks = trips.flatMap { it.stops }.flatMap { it.chargerPks }.toSet()
             // Custom chargers aren't in Electroverse's backend, so repo.getChargersByPks()
             // would always fail to resolve them (Room cache miss -> network fetch -> null),
@@ -75,7 +83,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
 
         // Keep chargerMap live: when StopDetailScreen's Worker saves fresh data to Room,
         // the Flow here re-emits so we pick up the update before the user re-enters a stop
-        lifecycleScope.launch {
+        observeJob = lifecycleScope.launch {
             val allPks = trips.flatMap { it.stops }.flatMap { it.chargerPks }
             if (allPks.isEmpty()) return@launch
             app.database.chargerDao().observeByPks(allPks).debounce(300).collect { entities ->
