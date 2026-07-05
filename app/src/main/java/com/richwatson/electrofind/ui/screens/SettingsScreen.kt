@@ -7,8 +7,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.EvStation
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,7 +28,9 @@ fun SettingsScreen(
     appPreferences: AppPreferences,
     onBack: () -> Unit,
     onShowCurve: () -> Unit = {},
-    onShowBackup: () -> Unit = {}
+    onShowBackup: () -> Unit = {},
+    onShowCustomChargers: () -> Unit = {},
+    onShowAbout: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
     var localStartSoc by remember(state.startSocPercent) { mutableIntStateOf(state.startSocPercent) }
@@ -218,65 +223,76 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onShowCurve)
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.ShowChart,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Charge curve", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Upload custom charge curves for additional car profiles",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            SettingsLinkRow(
+                icon = Icons.Default.ShowChart,
+                title = "Charge curve",
+                subtitle = "Upload custom charge curves for additional car profiles",
+                onClick = onShowCurve
+            )
 
             HorizontalDivider()
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onShowBackup)
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.SaveAlt,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Backup & restore", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Export and import your chargers, favourites and routes",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            SettingsLinkRow(
+                icon = Icons.Default.SaveAlt,
+                title = "Backup & restore",
+                subtitle = "Export and import your chargers, favourites and routes",
+                onClick = onShowBackup
+            )
+
+            HorizontalDivider()
+
+            SettingsLinkRow(
+                icon = Icons.Default.EvStation,
+                title = "My chargers",
+                subtitle = "Add and edit your own custom chargers",
+                onClick = onShowCustomChargers
+            )
+
+            HorizontalDivider()
+
+            SettingsLinkRow(
+                icon = Icons.Default.Info,
+                title = "About",
+                subtitle = "Version and app information",
+                onClick = onShowAbout
+            )
         }
+    }
+}
+
+@Composable
+private fun SettingsLinkRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

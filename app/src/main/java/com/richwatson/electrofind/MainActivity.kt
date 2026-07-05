@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.AddCircle
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
@@ -133,8 +131,13 @@ class MainActivity : ComponentActivity() {
                                     icon = { Icon(Icons.Default.Route, null) },
                                     label = { Text("Route", fontSize = 10.sp) }
                                 )
+                                // Custom chargers and About live inside Settings — Material caps
+                                // bottom navigation at 5 destinations before labels/targets shrink.
                                 NavigationBarItem(
-                                    selected = currentRoute in listOf("settings", "curve"),
+                                    selected = currentRoute in listOf(
+                                        "settings", "curve", "backup_restore",
+                                        "custom_chargers", "custom_charger_form", "about"
+                                    ),
                                     onClick = {
                                         navController.navigate("settings") {
                                             popUpTo("search")
@@ -143,28 +146,6 @@ class MainActivity : ComponentActivity() {
                                     },
                                     icon = { Icon(Icons.Default.Settings, null) },
                                     label = { Text("Settings", fontSize = 10.sp) }
-                                )
-                                NavigationBarItem(
-                                    selected = currentRoute in listOf("custom_chargers", "custom_charger_form"),
-                                    onClick = {
-                                        navController.navigate("custom_chargers") {
-                                            popUpTo("search")
-                                            launchSingleTop = true
-                                        }
-                                    },
-                                    icon = { Icon(Icons.Default.AddCircle, null) },
-                                    label = { Text("Mine", fontSize = 10.sp) }
-                                )
-                                NavigationBarItem(
-                                    selected = currentRoute == "about",
-                                    onClick = {
-                                        navController.navigate("about") {
-                                            popUpTo("search")
-                                            launchSingleTop = true
-                                        }
-                                    },
-                                    icon = { Icon(Icons.Default.Info, null) },
-                                    label = { Text("About", fontSize = 10.sp) }
                                 )
                             }
                         }
@@ -256,6 +237,12 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onShowBackup = {
                                     navController.navigate("backup_restore") { launchSingleTop = true }
+                                },
+                                onShowCustomChargers = {
+                                    navController.navigate("custom_chargers") { launchSingleTop = true }
+                                },
+                                onShowAbout = {
+                                    navController.navigate("about") { launchSingleTop = true }
                                 }
                             )
                         }
