@@ -4,7 +4,6 @@ import android.content.Context
 import android.location.Geocoder
 import android.util.Log
 import com.google.gson.Gson
-import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.api.ElectroverseService
 import com.richwatson.electrofind.auth.TokenManager
@@ -13,7 +12,6 @@ import com.richwatson.electrofind.api.models.ChargingLocationWrapper
 import com.richwatson.electrofind.api.models.GraphQLRequest
 import com.richwatson.electrofind.api.models.GraphQLResponse
 import com.richwatson.electrofind.api.models.LocationSuggestion
-import com.richwatson.electrofind.api.models.TileLocation
 import com.richwatson.electrofind.db.CachedChargerEntity
 import com.richwatson.electrofind.db.ChargerDao
 import com.richwatson.electrofind.util.TileCalculator
@@ -29,7 +27,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import com.google.gson.annotations.SerializedName
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
@@ -334,55 +331,6 @@ class ChargerRepository(
             i++
         }
         return pks.distinct()
-    }
-
-    // The tile response format isn't captured in the Burp file (all responses were 308 redirects
-    // that weren't followed). We try multiple common JSON shapes here and log the raw body
-    // on the first call so you can adapt this if the actual format differs.
-    private fun parseTilePks(body: String): List<Long> {
-        return try {
-            val root = JsonParser.parseString(body)
-            when {
-                root.isJsonArray -> {
-                    val type = object : TypeToken<List<TileLocation>>() {}.type
-                    val locations: List<TileLocation> = gson.fromJson(root, type)
-                    locations.mapNotNull { it.resolvedPk }
-                }
-                root.isJsonObject -> {
-                    val obj = root.asJsonObject
-                    // Elasticsearch shape: { hits: { hits: [ { _id: "123" }, ... ] } }
-                    val hitsOuter = obj.getAsJsonObject("hits")
-                    if (hitsOuter != null) {
-                        val hitsInner = hitsOuter.getAsJsonArray("hits")
-                        if (hitsInner != null) {
-                            return hitsInner.mapNotNull { el ->
-                                el.asJsonObject.get("_id")?.asString?.toLongOrNull()
-                            }
-                        }
-                    }
-                    // Fallback: common wrapper keys
-                    val arrayEl = obj.get("results")
-                        ?: obj.get("features")
-                        ?: obj.get("locations")
-                        ?: obj.get("data")
-                    if (arrayEl != null && arrayEl.isJsonArray) {
-                        val type = object : TypeToken<List<TileLocation>>() {}.type
-                        val locations: List<TileLocation> = gson.fromJson(arrayEl, type)
-                        locations.mapNotNull { it.resolvedPk }
-                    } else {
-                        Log.w(TAG, "Tile JSON object shape unrecognised; raw: ${body.take(300)}")
-                        emptyList()
-                    }
-                }
-                else -> {
-                    Log.w(TAG, "Tile response is not JSON; raw: ${body.take(300)}")
-                    emptyList()
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse tile response: ${body.take(300)}", e)
-            emptyList()
-        }
     }
 
     suspend fun getChargersByPks(pks: Set<Long>): List<ChargingLocation> = withContext(Dispatchers.IO) {

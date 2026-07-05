@@ -267,25 +267,3 @@ data class ConnectorStandard(
     val humanName: String,
     val name: String
 )
-
-// ---- Tile response (format to be confirmed via testing) ----
-// The tile API returns charger location summaries. Format unknown from capture
-// (all captured responses were 308 redirects). We handle both array and object responses.
-
-data class TileLocation(
-    val pk: Long?,
-    @SerializedName("location_pk") val locationPk: Long?,
-    @SerializedName("charging_location_pk") val chargingLocationPk: Long?,
-    val id: Long?,
-    val latitude: Double?,
-    val longitude: Double?,
-    val lat: Double?,
-    val lng: Double?,
-    val status: String?,
-    val name: String?,
-    @SerializedName("external_id") val externalId: String?
-) {
-    val resolvedPk: Long? get() = pk ?: locationPk ?: chargingLocationPk ?: id
-    val resolvedLat: Double? get() = latitude ?: lat
-    val resolvedLng: Double? get() = longitude ?: lng
-}

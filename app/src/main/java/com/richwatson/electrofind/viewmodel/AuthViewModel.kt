@@ -28,11 +28,6 @@ class AuthViewModel(private val tokenManager: TokenManager) : ViewModel() {
         }
     }
 
-    // Called by the WebView login screen once login is detected
-    fun onWebViewLoginComplete(url: String) {
-        extractAndSaveWebViewCookies()
-    }
-
     // Extract token, refreshToken and csrftoken cookies from the WebView cookie store
     fun extractAndSaveWebViewCookies() {
         val raw = CookieManager.getInstance().getCookie("https://electroverse.com") ?: return
