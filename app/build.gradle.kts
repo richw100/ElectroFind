@@ -47,7 +47,7 @@ android {
             resValue("string", "app_name", "ElectroFind Debug")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
