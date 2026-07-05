@@ -150,6 +150,18 @@ class ChargerViewModel(
     }
 
     private fun applyFiltersAndSort(source: List<ChargingLocation>, s: SearchState): List<ChargingLocation> {
+        // simCost() runs a full charge-curve simulation; with a cost filter and a cost sort
+        // active it used to run 3-4x per charger on every recomposition. Compute each variant
+        // at most once per charger per pass, and only when something actually uses it.
+        val needsOptimalCost = s.minOptimalCost != null || s.maxOptimalCost != null ||
+            s.sortOrder == SortOrder.OPTIMAL_COST_ASC
+        val needsStayCost = s.minStayCost != null || s.maxStayCost != null ||
+            s.sortOrder == SortOrder.STAY_COST_ASC
+        val optimalCosts: Map<Long, Double?> =
+            if (needsOptimalCost) source.associate { it.pk to it.simCost(s, null) } else emptyMap()
+        val stayCosts: Map<Long, Double?> =
+            if (needsStayCost) source.associate { it.pk to it.simCost(s, s.stayMinutes.toDouble()) } else emptyMap()
+
         var list = source
         if (s.hideExcluded) list = list.filter { it.pk !in s.excludedPks }
         list = when (s.speedFilter) {
@@ -169,20 +181,16 @@ class ChargerViewModel(
         }
         s.minPriceKwh?.let { min -> list = list.filter { (it.pricePerKwh ?: 0.0) >= min } }
         s.maxPriceKwh?.let { max -> list = list.filter { (it.pricePerKwh ?: 0.0) <= max } }
-        s.minOptimalCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, null) ?: 0.0) >= min } }
-        s.maxOptimalCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, null) ?: Double.MAX_VALUE) <= max } }
-        s.minStayCost?.let { min -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: 0.0) >= min } }
-        s.maxStayCost?.let { max -> list = list.filter { charger -> (charger.simCost(s, s.stayMinutes.toDouble()) ?: Double.MAX_VALUE) <= max } }
+        s.minOptimalCost?.let { min -> list = list.filter { charger -> (optimalCosts[charger.pk] ?: 0.0) >= min } }
+        s.maxOptimalCost?.let { max -> list = list.filter { charger -> (optimalCosts[charger.pk] ?: Double.MAX_VALUE) <= max } }
+        s.minStayCost?.let { min -> list = list.filter { charger -> (stayCosts[charger.pk] ?: 0.0) >= min } }
+        s.maxStayCost?.let { max -> list = list.filter { charger -> (stayCosts[charger.pk] ?: Double.MAX_VALUE) <= max } }
         list = when (s.sortOrder) {
             SortOrder.PRICE_ASC -> list.sortedBy { it.pricePerKwh ?: Double.MAX_VALUE }
             SortOrder.PRICE_DESC -> list.sortedByDescending { it.pricePerKwh ?: -1.0 }
             SortOrder.SPEED_DESC -> list.sortedByDescending { it.maxKilowatts ?: 0.0 }
-            SortOrder.OPTIMAL_COST_ASC -> list.sortedBy { charger ->
-                charger.simCost(s, stayMinutes = null) ?: Double.MAX_VALUE
-            }
-            SortOrder.STAY_COST_ASC -> list.sortedBy { charger ->
-                charger.simCost(s, stayMinutes = s.stayMinutes.toDouble()) ?: Double.MAX_VALUE
-            }
+            SortOrder.OPTIMAL_COST_ASC -> list.sortedBy { optimalCosts[it.pk] ?: Double.MAX_VALUE }
+            SortOrder.STAY_COST_ASC -> list.sortedBy { stayCosts[it.pk] ?: Double.MAX_VALUE }
         }
         return list
     }
