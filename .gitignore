@@ -20,3 +20,6 @@ local.properties
 
 # Test results
 test-results/
+
+# Captured API traffic (contains session tokens)
+electroverseRequests
