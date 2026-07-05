@@ -237,7 +237,7 @@ class ChargerRepository(
                                             totalQueued.incrementAndGet()
                                             pkChannel.send(pk)
                                         }
-                                        now - entity.cachedAt > STALE_MS -> {
+                                        now - entity.cachedAt > ChargingLocation.STALE_MS -> {
                                             // Stale — only show and refresh if within radius.
                                             // entity.lat/lng avoids deserialising JSON just to check distance.
                                             val clat = entity.lat
@@ -447,8 +447,6 @@ class ChargerRepository(
     }
 
     companion object {
-        private const val STALE_MS = 7 * 24 * 3600_000L
-
         private val CHARGING_LOCATION_QUERY = """
             query chargingLocation(${'$'}pk: String!) {
               chargingLocation(pk: ${'$'}pk) {

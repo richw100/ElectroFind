@@ -67,6 +67,14 @@ class TokenManager(context: Context) {
     val isLoggedIn: Boolean
         get() = jwtToken != null
 
+    // Stable per-install ID sent as the X-Dui header — generated once and persisted so the
+    // API sees the same device across app restarts.
+    val deviceUid: String
+        get() = prefs.getString(KEY_DEVICE_UID, null)
+            ?: java.util.UUID.randomUUID().toString().also {
+                prefs.edit().putString(KEY_DEVICE_UID, it).apply()
+            }
+
     fun clear() {
         prefs.edit().clear().apply()
     }
@@ -78,5 +86,6 @@ class TokenManager(context: Context) {
         private const val KEY_JWT = "jwt_token"
         private const val KEY_REFRESH = "refresh_token"
         private const val KEY_CSRF = "csrf_token"
+        private const val KEY_DEVICE_UID = "device_uid"
     }
 }

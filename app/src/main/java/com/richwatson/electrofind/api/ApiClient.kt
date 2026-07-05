@@ -5,15 +5,13 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
     private const val BASE_URL = "https://electroverse.com/"
-    // Stable device ID persisted via TokenManager (set on first build)
-    private var deviceUid: String = UUID.randomUUID().toString()
 
     fun buildService(tokenManager: TokenManager): ElectroverseService {
+        val deviceUid = tokenManager.deviceUid
         val authInterceptor = Interceptor { chain ->
             val original = chain.request()
             val builder = original.newBuilder()
