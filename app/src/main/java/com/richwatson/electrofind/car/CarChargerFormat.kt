@@ -1,16 +1,26 @@
 package com.richwatson.electrofind.car
 
+import android.content.Context
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.ConnectorPriceSummary
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
+import com.richwatson.electrofind.preferences.AppPreferences
+import com.richwatson.electrofind.repository.CarProfileRepository
 import com.richwatson.electrofind.util.CurrencyConversion
 import com.richwatson.electrofind.util.KonaChargeCurve
 import kotlin.math.roundToInt
 
+// The same profile the phone app simulates with (SearchState.activeProfile) — the car
+// screens must resolve it themselves since they don't go through ChargerViewModel.
+internal fun activeCarProfile(context: Context): CarProfile {
+    val all = listOf(CarProfile.KONA_LR) + CarProfileRepository(context).loadAll()
+    return all.find { it.id == AppPreferences(context).activeProfileId } ?: CarProfile.KONA_LR
+}
+
 // Shared row-content formatting so every Android Auto screen (trip stop list,
 // charger alternatives list) describes a charger the same way.
-internal fun ChargingLocation.chargerDetailLines(stop: RouteStop, convertToGbp: Boolean = false): Pair<String, String> {
+internal fun ChargingLocation.chargerDetailLines(stop: RouteStop, convertToGbp: Boolean, profile: CarProfile): Pair<String, String> {
     val availByKw = availabilityByKw
 
     val line1 = connectorPriceSummaries
@@ -24,7 +34,7 @@ internal fun ChargingLocation.chargerDetailLines(stop: RouteStop, convertToGbp: 
                 stop.arrivalSocPercent.toFloat(),
                 stop.departureSocPercent.toFloat(),
                 s.kilowatts!!, null,
-                profile = CarProfile.KONA_LR
+                profile = profile
             ).chargeMinutes
             val avParts = listOfNotNull(
                 if (avail > 0) "${avail}a" else null,
@@ -39,7 +49,7 @@ internal fun ChargingLocation.chargerDetailLines(stop: RouteStop, convertToGbp: 
         .distinct()
         .filter { it.isNotEmpty() }
 
-    val costText = buildCostText(this, stop, convertToGbp)
+    val costText = buildCostText(this, stop, convertToGbp, profile)
     val line2Parts = mutableListOf<String>()
     if (costText.isNotEmpty()) line2Parts.add(costText)
     if (connectorTypes.isNotEmpty()) line2Parts.add(connectorTypes.joinToString("/"))
@@ -63,23 +73,23 @@ internal fun abbreviateConnectorType(type: String): String = when {
     else -> type.take(6)
 }
 
-internal fun buildCostText(charger: ChargingLocation, stop: RouteStop, convertToGbp: Boolean = false): String {
+internal fun buildCostText(charger: ChargingLocation, stop: RouteStop, convertToGbp: Boolean, profile: CarProfile): String {
     val kw = charger.maxKilowatts ?: return ""
     val price = charger.pricePerKwh ?: return ""
-    return buildCostTextFor(charger, stop, kw, price, convertToGbp)
+    return buildCostTextFor(charger, stop, kw, price, convertToGbp, profile)
 }
 
 // Per-connector-tier variant: a charger can have multiple connector speeds priced
 // differently (e.g. 110kW vs 22kW), so the combined buildCostText() above doesn't tell
 // you which price it used — this computes the estimate for one specific tier instead.
-internal fun buildConnectorCostText(charger: ChargingLocation, stop: RouteStop, summary: ConnectorPriceSummary, convertToGbp: Boolean = false): String {
+internal fun buildConnectorCostText(charger: ChargingLocation, stop: RouteStop, summary: ConnectorPriceSummary, convertToGbp: Boolean, profile: CarProfile): String {
     if (summary.isFree) return "FREE"
     val kw = summary.kilowatts ?: return ""
     val price = summary.pricePerKwh ?: return ""
-    return buildCostTextFor(charger, stop, kw, price, convertToGbp)
+    return buildCostTextFor(charger, stop, kw, price, convertToGbp, profile)
 }
 
-private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double, convertToGbp: Boolean = false): String {
+private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double, convertToGbp: Boolean, profile: CarProfile): String {
     val connectionFee = charger.connectionFeeMajor ?: 0.0
     val chargingRate = charger.chargingTimeRateMajor ?: 0.0
     val parkingRate = charger.parkingTimeRateMajor ?: 0.0
@@ -90,7 +100,7 @@ private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Dou
         stop.departureSocPercent.toFloat(),
         kw,
         stayMinutes = null,
-        profile = CarProfile.KONA_LR
+        profile = profile
     )
     val optCost = KonaChargeCurve.totalCost(optResult, price, connectionFee, chargingRate, parkingRate, gracePeriodMinutes = gracePeriod)
 
@@ -99,7 +109,7 @@ private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Dou
         stop.departureSocPercent.toFloat(),
         kw,
         stayMinutes = stop.stayMinutes.toDouble(),
-        profile = CarProfile.KONA_LR
+        profile = profile
     )
     val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble(), gracePeriod)
     val nativeCur = charger.currencySymbol ?: "€"

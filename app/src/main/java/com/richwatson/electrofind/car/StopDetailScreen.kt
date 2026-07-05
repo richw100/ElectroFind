@@ -136,6 +136,7 @@ class StopDetailScreen(
         val baseTitle = stop.displayName(stopIndex)
 
         // Active charger always first so it's always on page 0
+        val profile = activeCarProfile(carContext)
         val sortedPks = stop.chargerPks.sortedByDescending { if (it == stop.activePk) 1 else 0 }
         val chargerRows = sortedPks.mapNotNull { pk ->
             val charger = chargerMap[pk] ?: return@mapNotNull null
@@ -143,7 +144,7 @@ class StopDetailScreen(
             val prefix = if (isActivePk) "★ " else ""
             val onSelect: () -> Unit = { screenManager.push(chargerDetailScreen(charger, stop)) }
             val onMakePrimary: () -> Unit = { saveStop(stop.copy(activeIndex = stop.chargerPks.indexOf(pk))) }
-            chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary)
+            chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary, profile)
         }
 
         // Settings rows are appended directly here (rather than behind a separate "Edit stop"
@@ -222,9 +223,10 @@ class StopDetailScreen(
         starIcon: CarIcon,
         isActive: Boolean,
         onSelect: () -> Unit,
-        onMakePrimary: () -> Unit
+        onMakePrimary: () -> Unit,
+        profile: CarProfile
     ): Row {
-        val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp)
+        val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp, profile)
 
         val lat = charger.coordinates.latitude
         val lng = charger.coordinates.longitude
@@ -267,6 +269,7 @@ class StopDetailScreen(
     private fun chargerDetailScreen(charger: ChargingLocation, stop: RouteStop): Screen =
         object : Screen(carContext) {
             override fun onGetTemplate(): Template {
+                val profile = activeCarProfile(carContext)
                 val availByKw = charger.availabilityByKw
                 val listBuilder = ItemList.Builder()
                 charger.connectorPriceSummaries.forEach { s ->
@@ -286,10 +289,10 @@ class StopDetailScreen(
                     val mins = s.kilowatts?.let {
                         KonaChargeCurve.simulate(
                             stop.arrivalSocPercent.toFloat(), stop.departureSocPercent.toFloat(),
-                            it, null, profile = CarProfile.KONA_LR
+                            it, null, profile = profile
                         ).chargeMinutes
                     }
-                    val costText = buildConnectorCostText(charger, stop, s, prefs.convertToGbp)
+                    val costText = buildConnectorCostText(charger, stop, s, prefs.convertToGbp, profile)
                     val line2 = listOfNotNull(
                         costText.takeIf { it.isNotEmpty() },
                         mins?.let { formatChargeMins(it) }

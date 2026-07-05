@@ -245,6 +245,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
     }
 
     private fun stopsTemplate(trip: Trip, title: String, headerAction: Action, refreshIcon: CarIcon, editIcon: CarIcon): ListTemplate {
+        val profile = activeCarProfile(carContext)
         val navigateIcon = CarIcon.Builder(
             IconCompat.createWithResource(carContext, R.drawable.ic_car_navigate)
         ).build()
@@ -261,7 +262,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             if (charger == null) {
                 rowBuilder.addText("Loading…")
             } else {
-                val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp)
+                val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp, profile)
                 val warn = if (isStaleForRefresh(charger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
                 rowBuilder.addText(if (line1.isNotEmpty()) "$warn${charger.name} · $line1" else "$warn${charger.name}")
                 if (line2.isNotEmpty()) rowBuilder.addText(line2)
