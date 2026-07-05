@@ -35,6 +35,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.util.formatDurationMinutes
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.ui.staleWarningPrefixed
@@ -47,9 +48,6 @@ import com.richwatson.electrofind.viewmodel.SortOrder
 import com.richwatson.electrofind.viewmodel.SpeedFilter
 
 data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes: Int, val profile: CarProfile = CarProfile.KONA_LR)
-
-private fun formatDurationMinutes(mins: Int): String =
-    if (mins < 60) "$mins min" else "${mins / 60}h ${"%02d".format(mins % 60)}min"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.util.formatDurationMinutes
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.ui.staleWarningPrefixed
@@ -92,9 +93,6 @@ import java.util.Date
 import java.util.Locale
 
 private data class ConfirmPendingAction(val title: String, val body: String, val onConfirm: () -> Unit)
-
-private fun formatDurationMinutes(mins: Int): String =
-    if (mins < 60) "$mins min" else "${mins / 60}h ${"%02d".format(mins % 60)}min"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

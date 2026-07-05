@@ -83,6 +83,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.util.formatDurationMinutes
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
 import com.richwatson.electrofind.ui.staleWarningPrefixed
@@ -100,9 +101,6 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
-
-private fun formatDurationMinutes(mins: Int): String =
-    if (mins < 60) "$mins min" else "${mins / 60}h ${"%02d".format(mins % 60)}min"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
