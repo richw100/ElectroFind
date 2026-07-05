@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -43,6 +44,7 @@ import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.util.KonaChargeCurve
+import com.richwatson.electrofind.util.LocationBrands
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import com.richwatson.electrofind.viewmodel.SortOrder
 import com.richwatson.electrofind.viewmodel.SpeedFilter
@@ -376,6 +378,56 @@ internal fun FilterBar(vm: ChargerViewModel, showSort: Boolean = true, modifier:
                     onClick = { vm.toggleConnectorFilter(connector) },
                     label = { Text(connector) }
                 )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("Location type", style = MaterialTheme.typography.labelMedium)
+        var brandMenuExpanded by remember { mutableStateOf(false) }
+        Box {
+            FilterChip(
+                selected = state.locationBrandFilters.isNotEmpty(),
+                onClick = { brandMenuExpanded = true },
+                label = {
+                    Text(
+                        if (state.locationBrandFilters.isEmpty()) "Any location"
+                        else "${state.locationBrandFilters.size} selected"
+                    )
+                },
+                trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) }
+            )
+            DropdownMenu(
+                expanded = brandMenuExpanded,
+                onDismissRequest = { brandMenuExpanded = false },
+                modifier = Modifier.heightIn(max = 400.dp)
+            ) {
+                if (state.locationBrandFilters.isNotEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("Clear all") },
+                        onClick = { vm.clearLocationBrandFilters() }
+                    )
+                    HorizontalDivider()
+                }
+                LocationBrands.groups.forEach { group ->
+                    val allSelected = group.brands.all { it.label in state.locationBrandFilters }
+                    DropdownMenuItem(
+                        text = { Text("All ${group.label}", fontWeight = FontWeight.Bold) },
+                        leadingIcon = { Checkbox(checked = allSelected, onCheckedChange = null) },
+                        onClick = { vm.toggleLocationBrandGroup(group) }
+                    )
+                    group.brands.forEach { brand ->
+                        DropdownMenuItem(
+                            text = { Text(brand.label) },
+                            leadingIcon = {
+                                Checkbox(
+                                    checked = brand.label in state.locationBrandFilters,
+                                    onCheckedChange = null
+                                )
+                            },
+                            modifier = Modifier.padding(start = 16.dp),
+                            onClick = { vm.toggleLocationBrandFilter(brand.label) }
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.height(6.dp))

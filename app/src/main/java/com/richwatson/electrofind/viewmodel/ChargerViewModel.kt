@@ -13,7 +13,9 @@ import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
 import com.richwatson.electrofind.model.toChargingLocation
 import com.richwatson.electrofind.repository.CarProfileRepository
+import com.richwatson.electrofind.util.BrandGroup
 import com.richwatson.electrofind.util.KonaChargeCurve
+import com.richwatson.electrofind.util.LocationBrands
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +51,7 @@ data class SearchState(
     val sortOrder: SortOrder = SortOrder.PRICE_ASC,
     val speedFilter: SpeedFilter = SpeedFilter.ALL,
     val connectorFilters: Set<String> = emptySet(),
+    val locationBrandFilters: Set<String> = emptySet(),
     val maxSpeedKw: Double? = null,
     val minPriceKwh: Double? = null,
     val maxPriceKwh: Double? = null,
@@ -178,6 +181,9 @@ class ChargerViewModel(
                     s.connectorFilters.any { f -> ct.contains(f, ignoreCase = true) }
                 }
             }
+        }
+        if (s.locationBrandFilters.isNotEmpty()) {
+            list = list.filter { LocationBrands.matches(it, s.locationBrandFilters) }
         }
         s.minPriceKwh?.let { min -> list = list.filter { (it.pricePerKwh ?: 0.0) >= min } }
         s.maxPriceKwh?.let { max -> list = list.filter { (it.pricePerKwh ?: 0.0) <= max } }
@@ -408,6 +414,28 @@ class ChargerViewModel(
             if (connector in updated) updated.remove(connector) else updated.add(connector)
             s.copy(connectorFilters = updated)
         }
+    }
+
+    fun toggleLocationBrandFilter(brandLabel: String) {
+        _state.update { s ->
+            val updated = s.locationBrandFilters.toMutableSet()
+            if (brandLabel in updated) updated.remove(brandLabel) else updated.add(brandLabel)
+            s.copy(locationBrandFilters = updated)
+        }
+    }
+
+    // Selects every brand in the group, or clears them all if they're already all selected.
+    fun toggleLocationBrandGroup(group: BrandGroup) {
+        _state.update { s ->
+            val labels = group.brands.map { it.label }
+            val updated = s.locationBrandFilters.toMutableSet()
+            if (updated.containsAll(labels)) updated.removeAll(labels.toSet()) else updated.addAll(labels)
+            s.copy(locationBrandFilters = updated)
+        }
+    }
+
+    fun clearLocationBrandFilters() {
+        _state.update { it.copy(locationBrandFilters = emptySet()) }
     }
 
     fun selectCharger(pk: Long?) {
