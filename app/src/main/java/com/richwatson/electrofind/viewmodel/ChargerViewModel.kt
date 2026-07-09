@@ -228,7 +228,7 @@ class ChargerViewModel(
     fun searchByPlaceName(name: String, socketGroups: List<String> = listOf("CCS", "TYPE_2")) {
         if (name.isBlank()) return
         searchJob?.cancel()
-        _state.update { it.copy(isLoadingEv = true, error = null, searchQuery = name, chargers = emptyList()) }
+        _state.update { it.copy(isLoadingEv = true, error = null, searchQuery = name, chargers = emptyList(), selectedChargerPk = null) }
         searchJob = viewModelScope.launch {
             val coords = repository.geocode(name)
             if (coords == null) {
@@ -266,7 +266,10 @@ class ChargerViewModel(
                 searchQuery = immediateLabel,
                 searchLat = lat, searchLng = lng,
                 savedMapCenterLat = lat, savedMapCenterLng = lng, savedMapZoom = 12.0,
-                chargers = emptyList()
+                chargers = emptyList(),
+                // A new search invalidates the previous "show on map" selection — leaving it set
+                // makes the results map snap back to the old charger as results stream in.
+                selectedChargerPk = null
             )
         }
         addToHistory(immediateLabel, lat, lng)

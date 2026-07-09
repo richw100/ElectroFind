@@ -564,11 +564,16 @@ fun ChargerMapView(
         }
     }
 
+    // chargers stays a key so centering retries until the selected charger has loaded, but a
+    // selection is only centred once — background refreshes and result streaming keep changing
+    // the list, and re-animating on each emission drags the map back after the user pans away.
+    var lastCenteredPk by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(selectedChargerPk, chargers) {
-        if (selectedChargerPk != null) {
+        if (selectedChargerPk != null && selectedChargerPk != lastCenteredPk) {
             chargers.find { it.pk == selectedChargerPk }?.let { charger ->
                 mapView.controller.animateTo(GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude))
                 if (mapView.zoomLevelDouble < 14.0) mapView.controller.setZoom(14.0)
+                lastCenteredPk = selectedChargerPk
             }
         }
     }
