@@ -25,8 +25,8 @@ android {
         applicationId = "com.richwatson.electrofind"
         minSdk = 24
         targetSdk = 35
-        versionCode = 64
-        versionName = "1.47.0"
+        versionCode = 65
+        versionName = "1.47.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
