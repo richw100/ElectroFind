@@ -45,9 +45,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.model.BackupFile
 import com.richwatson.electrofind.model.DataSet
 import com.richwatson.electrofind.model.MergeMode
+import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -63,6 +65,9 @@ fun BackupRestoreScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val gson = remember { Gson() }
+    val appPreferences = remember { AppPreferences(context) }
+    var lastManualExportAt by remember { mutableStateOf(appPreferences.lastManualExportAt) }
+    val lastAutoBackupAt = remember { appPreferences.lastAutoBackupAt }
 
     // Export selections
     val exportSelected = remember { mutableStateMapOf(
@@ -84,6 +89,8 @@ fun BackupRestoreScreen(
             try {
                 val json = chargerViewModel.buildExportJson(exportSelected.filterValues { it }.keys)
                 context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                appPreferences.lastManualExportAt = System.currentTimeMillis()
+                lastManualExportAt = appPreferences.lastManualExportAt
                 scope.launch { snackbar.showSnackbar("Exported successfully") }
             } catch (e: Exception) {
                 scope.launch { snackbar.showSnackbar("Export failed: ${e.message}") }
@@ -180,6 +187,18 @@ fun BackupRestoreScreen(
                     ) {
                         Text("Export to file")
                     }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Last manual export: " + (timeAgo(lastManualExportAt) ?: "never"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Automatic backup: " + (timeAgo(lastAutoBackupAt) ?: "never yet") +
+                            " · saved to Downloads/ElectroFind",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 

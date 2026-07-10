@@ -80,4 +80,15 @@ class AppPreferences(context: Context) {
     var convertToGbp: Boolean
         get() = prefs.getBoolean("convert_to_gbp", false)
         set(value) { prefs.edit().putBoolean("convert_to_gbp", value).apply() }
+
+    // Manual export via Backup & restore's file picker
+    var lastManualExportAt: Long
+        get() = prefs.getLong("last_manual_export_at", 0L)
+        set(value) { prefs.edit().putLong("last_manual_export_at", value).apply() }
+
+    // Automatic background export to the public Downloads/ElectroFind folder — survives
+    // an app uninstall/reinstall, unlike everything else in this file.
+    var lastAutoBackupAt: Long
+        get() = prefs.getLong("last_auto_backup_at", 0L)
+        set(value) { prefs.edit().putLong("last_auto_backup_at", value).apply() }
 }

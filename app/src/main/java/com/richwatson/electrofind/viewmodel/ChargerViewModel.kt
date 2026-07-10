@@ -16,6 +16,7 @@ import com.richwatson.electrofind.repository.CarProfileRepository
 import com.richwatson.electrofind.util.BrandGroup
 import com.richwatson.electrofind.util.KonaChargeCurve
 import com.richwatson.electrofind.util.LocationBrands
+import com.richwatson.electrofind.work.AutoBackupWorker
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -385,6 +386,7 @@ class ChargerViewModel(
         appPreferences.favouritePks = current
         _state.update { it.copy(favouritePks = current) }
         loadFavouriteChargers(current)
+        scheduleAutoBackup()
     }
 
     fun toggleExcluded(pk: Long) {
@@ -400,6 +402,13 @@ class ChargerViewModel(
         }
         appPreferences.excludedPks = currentExcluded
         _state.update { it.copy(excludedPks = currentExcluded) }
+        scheduleAutoBackup()
+    }
+
+    // Debounced background export to Downloads/ElectroFind — see AutoBackupWorker. Keeps a
+    // recoverable copy outside app-private storage so trips/favourites survive a reinstall.
+    private fun scheduleAutoBackup() {
+        AutoBackupWorker.scheduleSoon(application)
     }
 
     private fun loadFavouriteChargers(pks: Set<Long>) {
@@ -500,6 +509,7 @@ class ChargerViewModel(
 
     private fun saveRawCustomChargers(list: List<CustomCharger>) {
         appPreferences.rawCustomChargers = gson.toJson(list)
+        scheduleAutoBackup()
     }
 
     // ── Route planner / Trips ────────────────────────────────────────────────
@@ -535,6 +545,7 @@ class ChargerViewModel(
         // Keep rawRoutePlan mirroring the active trip for Android Auto
         val activeStops = trips.find { it.id == activeId }?.stops ?: trips.firstOrNull()?.stops ?: emptyList()
         appPreferences.rawRoutePlan = gson.toJson(activeStops)
+        scheduleAutoBackup()
     }
 
     private fun loadRouteChargers(pks: Set<Long>) {
@@ -874,6 +885,7 @@ class ChargerViewModel(
                 val merged = mergePkSet(s.favouritePks, imported.toSet(), mode)
                 appPreferences.favouritePks = merged
                 s = s.copy(favouritePks = merged)
+                scheduleAutoBackup()
             }
         }
         options[DataSet.EXCLUDED]?.let { mode ->
@@ -881,6 +893,7 @@ class ChargerViewModel(
                 val merged = mergePkSet(s.excludedPks, imported.toSet(), mode)
                 appPreferences.excludedPks = merged
                 s = s.copy(excludedPks = merged)
+                scheduleAutoBackup()
             }
         }
         options[DataSet.TRIPS]?.let { mode ->

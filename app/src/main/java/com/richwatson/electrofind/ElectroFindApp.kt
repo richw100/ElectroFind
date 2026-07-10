@@ -7,6 +7,7 @@ import com.richwatson.electrofind.db.AppDatabase
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.CarProfileRepository
 import com.richwatson.electrofind.repository.ChargerRepository
+import com.richwatson.electrofind.work.AutoBackupWorker
 import org.osmdroid.config.Configuration
 import java.io.File
 
@@ -25,6 +26,7 @@ class ElectroFindApp : Application() {
         repository = ChargerRepository(service, this, db.chargerDao(), tokenManager)
         appPreferences = AppPreferences(this)
         carProfileRepository = CarProfileRepository(this)
+        AutoBackupWorker.schedulePeriodic(this)
 
         Configuration.getInstance().apply {
             userAgentValue = packageName
