@@ -51,15 +51,18 @@ class AppPreferences(context: Context) {
         get() = prefs.getString("active_profile_id", CarProfile.KONA_LR_ID) ?: CarProfile.KONA_LR_ID
         set(value) { prefs.edit().putString("active_profile_id", value).apply() }
 
+    // Uses commit() (synchronous) rather than apply(): these hold irreplaceable user data,
+    // and apply()'s async write can be lost if the process is killed shortly after — e.g.
+    // when the Play Store swaps the APK during an update — before it reaches disk.
     var favouritePks: Set<Long>
         get() = prefs.getString("favourite_pks", "")!!
             .split(",").mapNotNull { it.toLongOrNull() }.toSet()
-        set(value) { prefs.edit().putString("favourite_pks", value.joinToString(",")).apply() }
+        set(value) { prefs.edit().putString("favourite_pks", value.joinToString(",")).commit() }
 
     var excludedPks: Set<Long>
         get() = prefs.getString("excluded_pks", "")!!
             .split(",").mapNotNull { it.toLongOrNull() }.toSet()
-        set(value) { prefs.edit().putString("excluded_pks", value.joinToString(",")).apply() }
+        set(value) { prefs.edit().putString("excluded_pks", value.joinToString(",")).commit() }
 
     var rawSearchHistory: String
         get() = prefs.getString("search_history", "") ?: ""
@@ -67,15 +70,15 @@ class AppPreferences(context: Context) {
 
     var rawRoutePlan: String
         get() = prefs.getString("route_plan", "") ?: ""
-        set(value) { prefs.edit().putString("route_plan", value).apply() }
+        set(value) { prefs.edit().putString("route_plan", value).commit() }
 
     var rawCustomChargers: String
         get() = prefs.getString("custom_chargers", "[]") ?: "[]"
-        set(value) { prefs.edit().putString("custom_chargers", value).apply() }
+        set(value) { prefs.edit().putString("custom_chargers", value).commit() }
 
     var rawTrips: String
         get() = prefs.getString("trips", "[]") ?: "[]"
-        set(value) { prefs.edit().putString("trips", value).apply() }
+        set(value) { prefs.edit().putString("trips", value).commit() }
 
     var convertToGbp: Boolean
         get() = prefs.getBoolean("convert_to_gbp", false)
