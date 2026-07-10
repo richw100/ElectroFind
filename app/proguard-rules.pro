@@ -11,8 +11,14 @@
 -keep class com.richwatson.electrofind.model.** { *; }
 -keep class com.richwatson.electrofind.repository.ChargerRepository$Photon* { *; }
 
-# Gson generic-type plumbing (TypeToken subclasses lose their type argument otherwise)
--keep class * extends com.google.gson.reflect.TypeToken
+# Gson generic-type plumbing. The anonymous `object : TypeToken<List<Trip>>() {}` subclasses
+# used throughout this codebase need their generic signature preserved at runtime so Gson can
+# read the type argument reflectively — a plain `-keep` on the class isn't enough for this;
+# R8's class-merging pass can still collapse the anonymous subclass into its supertype and lose
+# the signature, causing "TypeToken must be created with a type argument" at runtime. This is
+# Google's own documented fix for Gson + R8 (gson/UPGRADING.md).
+-keep,allowobfuscation,allowshrinking class com.google.gson.reflect.TypeToken
+-keep,allowobfuscation,allowshrinking class * extends com.google.gson.reflect.TypeToken
 -keep public class * implements java.lang.reflect.Type
 -dontwarn sun.misc.**
 
