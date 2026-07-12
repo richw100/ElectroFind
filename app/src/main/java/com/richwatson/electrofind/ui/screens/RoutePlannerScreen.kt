@@ -61,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -91,6 +92,7 @@ import com.richwatson.electrofind.viewmodel.ChargerViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 private data class ConfirmPendingAction(val title: String, val body: String, val onConfirm: () -> Unit)
 
@@ -229,6 +231,7 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
                             },
                             onMoveAlternative = { from, to -> chargerViewModel.moveAlternative(stop.id, from, to) },
                             onNameChanged = { chargerViewModel.updateRouteStopName(stop.id, it) },
+                            onNotesChanged = { chargerViewModel.updateRouteStopNotes(stop.id, it) },
                             onEditSession = { editStop = stop },
                             onShowOnMap = { charger?.let { onShowOnMap(it.pk) } },
                             onToggleFavourite = { chargerViewModel.toggleFavourite(stop.activePk) },
@@ -542,6 +545,7 @@ private fun RouteStopCard(
     onRemoveAlternative: (Long) -> Unit,
     onMoveAlternative: (fromIndex: Int, toIndex: Int) -> Unit,
     onNameChanged: (String) -> Unit,
+    onNotesChanged: (String) -> Unit,
     onEditSession: () -> Unit,
     onShowOnMap: () -> Unit,
     onToggleFavourite: () -> Unit,
@@ -553,8 +557,16 @@ private fun RouteStopCard(
 ) {
     val context = LocalContext.current
     var nameText by remember(stop.id) { mutableStateOf(stop.customName ?: "") }
+    var notesText by remember(stop.id) { mutableStateOf(stop.notes ?: "") }
     val contentColor = MaterialTheme.colorScheme.onSurface
     val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    // Debounced rather than saved per-keystroke: saveTrips() commits synchronously to disk,
+    // which would cause visible input lag on a longer field typed continuously.
+    LaunchedEffect(notesText) {
+        delay(600)
+        if (notesText != (stop.notes ?: "")) onNotesChanged(notesText)
+    }
 
     // Only convert when we have a known rate for this charger's native symbol — e.g. "kr" is
     // ambiguous between NOK/SEK/DKK, so it's left in its native currency rather than guessed.
@@ -844,6 +856,14 @@ private fun RouteStopCard(
                     }
                 }
             }
+
+            OutlinedTextField(
+                value = notesText,
+                onValueChange = { notesText = it },
+                label = { Text("Notes") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth()
+            )
 
             if (charger != null) {
                 Text(

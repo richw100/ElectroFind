@@ -147,10 +147,16 @@ class StopDetailScreen(
             chargerRow(charger, prefix, stop, navigateIcon, starIcon, isActivePk, onSelect, onMakePrimary, profile)
         }
 
+        // Non-interactive — just a glance-while-driving display, no click handler. Skipped
+        // entirely when there are no notes rather than showing an empty row.
+        val notesRow = stop.notes?.takeIf { it.isNotBlank() }?.let {
+            Row.Builder().setTitle("Notes").addText(it.take(120)).build()
+        }
+
         // Settings rows are appended directly here (rather than behind a separate "Edit stop"
         // screen) so opening one only costs one push beyond StopDetailScreen, not two — see the
         // task-quota writeup in the plan this replaced editMenuScreen() from.
-        val rows = chargerRows + settingsRows()
+        val rows = listOfNotNull(notesRow) + chargerRows + settingsRows()
         dlog("onGetTemplateInternal: chargerRows=${chargerRows.size} totalRows=${rows.size} chargerPage=$chargerPage")
         return carContext.pagedListTemplate(baseTitle, rows, chargerPage) { chargerPage = it; invalidate() }
     }

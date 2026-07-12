@@ -774,6 +774,14 @@ class ChargerViewModel(
         _state.update { it.copy(trips = updated) }
     }
 
+    fun updateRouteStopNotes(stopId: String, notes: String) {
+        val updated = updateStopInTrips(stopId) { stop ->
+            stop.copy(notes = notes.takeIf { it.isNotBlank() })
+        }
+        saveTrips(updated)
+        _state.update { it.copy(trips = updated) }
+    }
+
     fun clearRoute() {
         val activeId = _state.value.activeTripId
         val updated = _state.value.trips.map { trip ->
