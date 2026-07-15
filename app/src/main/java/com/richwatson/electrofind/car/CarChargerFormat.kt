@@ -73,26 +73,34 @@ internal fun abbreviateConnectorType(type: String): String = when {
     else -> type.take(6)
 }
 
+// Combined single-line summary: uses the fastest connector tier's own price/fees so the
+// kW, €/kWh and per-minute rates are always from the same connector, not a mismatched mix.
 internal fun buildCostText(charger: ChargingLocation, stop: RouteStop, convertToGbp: Boolean, profile: CarProfile): String {
-    val kw = charger.maxKilowatts ?: return ""
-    val price = charger.pricePerKwh ?: return ""
-    return buildCostTextFor(charger, stop, kw, price, convertToGbp, profile)
+    val fastest = charger.connectorPriceSummaries.maxByOrNull { it.kilowatts ?: -1.0 } ?: return ""
+    return buildConnectorCostText(charger, stop, fastest, convertToGbp, profile)
 }
 
 // Per-connector-tier variant: a charger can have multiple connector speeds priced
-// differently (e.g. 110kW vs 22kW), so the combined buildCostText() above doesn't tell
-// you which price it used — this computes the estimate for one specific tier instead.
+// differently (e.g. 110kW vs 22kW, or different per-minute rates) — this computes the
+// estimate for one specific tier using that tier's own price/fees throughout.
 internal fun buildConnectorCostText(charger: ChargingLocation, stop: RouteStop, summary: ConnectorPriceSummary, convertToGbp: Boolean, profile: CarProfile): String {
     if (summary.isFree) return "FREE"
     val kw = summary.kilowatts ?: return ""
     val price = summary.pricePerKwh ?: return ""
-    return buildCostTextFor(charger, stop, kw, price, convertToGbp, profile)
+    return buildCostTextFor(
+        charger, stop, kw, price,
+        summary.connectionFeeMajor ?: 0.0,
+        summary.chargingTimeRateMajor ?: 0.0,
+        summary.parkingTimeRateMajor ?: 0.0,
+        convertToGbp, profile
+    )
 }
 
-private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double, convertToGbp: Boolean, profile: CarProfile): String {
-    val connectionFee = charger.connectionFeeMajor ?: 0.0
-    val chargingRate = charger.chargingTimeRateMajor ?: 0.0
-    val parkingRate = charger.parkingTimeRateMajor ?: 0.0
+private fun buildCostTextFor(
+    charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double,
+    connectionFee: Double, chargingRate: Double, parkingRate: Double,
+    convertToGbp: Boolean, profile: CarProfile
+): String {
     val gracePeriod = charger.gracePeriodMinutes
 
     val optResult = KonaChargeCurve.simulate(
@@ -118,8 +126,10 @@ private fun buildCostTextFor(charger: ChargingLocation, stop: RouteStop, kw: Dou
     val cur = if (gbpRate != null) "£" else nativeCur
     fun conv(amount: Double): Double = if (gbpRate != null) amount * gbpRate else amount
 
+    val staySoc = stayResult.endSocPercent.toInt()
+
     return buildString {
-        append("Opt $cur${"%.2f".format(conv(optCost))} Stay $cur${"%.2f".format(conv(stayCost))}")
+        append("Opt $cur${"%.2f".format(conv(optCost))} Stay $cur${"%.2f".format(conv(stayCost))}→${staySoc}%")
         if (connectionFee > 0) append(" +$cur${"%.2f".format(conv(connectionFee))}")
         if (chargingRate > 0) append(" +$cur${"%.2f".format(conv(chargingRate))}/m")
         if (parkingRate > 0) append(" +$cur${"%.2f".format(conv(parkingRate))}/m park")

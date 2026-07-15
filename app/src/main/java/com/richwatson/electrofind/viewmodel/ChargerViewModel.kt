@@ -971,23 +971,31 @@ class ChargerViewModel(
     } catch (e: Exception) { "€" }
 }
 
+// Cheapest achievable session cost across whatever connector tiers exist at this location —
+// computed per-tier (kw/price/fees all from the same ConnectorPriceSummary) rather than mixing
+// maxKilowatts with a possibly-different tier's price, which could silently pick the wrong pair
+// at multi-tier locations (e.g. a 22kW connector at €0.08/min vs a 7kW connector at €0.04/min).
 private fun ChargingLocation.simCost(state: SearchState, stayMinutes: Double?): Double? {
-    val kw = maxKilowatts ?: return null
-    val price = pricePerKwh ?: return null
-    val result = KonaChargeCurve.simulate(
-        state.startSocPercent.toFloat(),
-        state.targetSocPercent.toFloat(),
-        kw,
-        stayMinutes,
-        profile = state.activeProfile
-    )
-    return KonaChargeCurve.totalCost(
-        result = result,
-        pricePerKwh = price,
-        connectionFee = connectionFeeMajor ?: 0.0,
-        chargingRatePerMin = chargingTimeRateMajor ?: 0.0,
-        parkingRatePerMin = parkingTimeRateMajor ?: 0.0,
-        stayMinutes = stayMinutes ?: result.chargeMinutes,
-        gracePeriodMinutes = gracePeriodMinutes
-    )
+    val tiers = connectorPriceSummaries.filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
+    if (tiers.isEmpty()) return null
+    return tiers.mapNotNull { tier ->
+        val kw = tier.kilowatts!!
+        val price = if (tier.isFree) 0.0 else tier.pricePerKwh!!
+        val result = KonaChargeCurve.simulate(
+            state.startSocPercent.toFloat(),
+            state.targetSocPercent.toFloat(),
+            kw,
+            stayMinutes,
+            profile = state.activeProfile
+        )
+        KonaChargeCurve.totalCost(
+            result = result,
+            pricePerKwh = price,
+            connectionFee = tier.connectionFeeMajor ?: 0.0,
+            chargingRatePerMin = tier.chargingTimeRateMajor ?: 0.0,
+            parkingRatePerMin = tier.parkingTimeRateMajor ?: 0.0,
+            stayMinutes = stayMinutes ?: result.chargeMinutes,
+            gracePeriodMinutes = gracePeriodMinutes
+        )
+    }.minOrNull()
 }

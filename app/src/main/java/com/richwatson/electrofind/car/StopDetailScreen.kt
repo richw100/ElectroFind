@@ -236,11 +236,11 @@ class StopDetailScreen(
 
         val lat = charger.coordinates.latitude
         val lng = charger.coordinates.longitude
-        val mapsUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
+        val mapsUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.displayName})")
         val warn = if (isStaleForRefresh(charger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
 
         return Row.Builder()
-            .setTitle("$warn$prefix${charger.name}")
+            .setTitle("$warn$prefix${charger.displayName}")
             .apply {
                 if (line1.isNotEmpty()) addText(line1)
                 if (line2.isNotEmpty()) addText(line2)
@@ -316,7 +316,7 @@ class StopDetailScreen(
                 }
 
                 val builder = ListTemplate.Builder()
-                    .setTitle(charger.name)
+                    .setTitle(charger.displayName)
                     .setHeaderAction(Action.BACK)
                     .setSingleList(listBuilder.build())
 

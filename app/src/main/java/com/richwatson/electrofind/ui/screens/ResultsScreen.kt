@@ -561,7 +561,7 @@ private fun ChargerCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        staleWarningPrefixed(charger.name, isStaleForRefresh(charger.cachedAt, refreshPeriodMs)),
+                        staleWarningPrefixed(charger.displayName, isStaleForRefresh(charger.cachedAt, refreshPeriodMs)),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -638,30 +638,43 @@ private fun ChargerCard(
                 ConnectorPriceRow(summary, currencySymbol, availByKw)
             }
 
-            charger.connectionFeeMajor?.let { fee ->
-                Text(
-                    "+ %s%.2f connection fee".format(currencySymbol, fee),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            charger.chargingTimeRateMajor?.let { rate ->
-                Text(
-                    "+ %s%.2f/min while charging".format(currencySymbol, rate),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            charger.parkingTimeRateMajor?.let { rate ->
-                Text(
-                    "+ %s%.2f/min idle fee".format(currencySymbol, rate),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            run {
+                val feeGroups = charger.connectorPriceSummaries
+                    .filter { it.connectionFeeMajor != null || it.chargingTimeRateMajor != null || it.parkingTimeRateMajor != null }
+                    .groupBy { Triple(it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
+                    .map { (_, group) ->
+                        group.maxByOrNull { it.kilowatts ?: 0.0 }!! to
+                            group.mapNotNull { it.kilowatts?.toInt() }.distinct().sorted()
+                    }
+                val multiFeeGroup = feeGroups.size > 1
+                feeGroups.forEach { (s, kws) ->
+                    val prefix = if (multiFeeGroup) "${kws.joinToString("/")}kW " else ""
+                    s.connectionFeeMajor?.let { fee ->
+                        Text(
+                            "$prefix+ %s%.2f connection fee".format(currencySymbol, fee),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    s.chargingTimeRateMajor?.let { rate ->
+                        Text(
+                            "$prefix+ %s%.2f/min while charging".format(currencySymbol, rate),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    s.parkingTimeRateMajor?.let { rate ->
+                        Text(
+                            "$prefix+ %s%.2f/min idle fee".format(currencySymbol, rate),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
             if (session != null) {
                 val priceGroups = charger.connectorPriceSummaries
-                    .groupBy { it.pricePerKwh to it.isFree }
+                    .groupBy { listOf(it.pricePerKwh, it.isFree, it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
                     .map { (_, group) -> group.first() }
                     .sortedByDescending { it.kilowatts ?: 0.0 }
                     .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
@@ -672,9 +685,9 @@ private fun ChargerCard(
                         val kw = s.kilowatts!!
                         val price = if (s.isFree) 0.0 else s.pricePerKwh!!
                         val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                        val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                        val optCost = KonaChargeCurve.totalCost(optResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
                         val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
                         val optMins = optResult.chargeMinutes.toInt()
                         val optSoc = optResult.endSocPercent.toInt()
                         val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
@@ -740,7 +753,7 @@ private fun ChargerCard(
                 val lng = charger.coordinates.longitude
                 TextButton(
                     onClick = {
-                        val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
+                        val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.displayName})")
                         context.startActivity(Intent(Intent.ACTION_VIEW, uri))
                     },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)

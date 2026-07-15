@@ -63,14 +63,23 @@ data class ChargingLocation(
     // True when loaded from cache and data is older than one week
     val isStale: Boolean get() = cachedAt > 0 && System.currentTimeMillis() - cachedAt > STALE_MS
 
-    // Convenience: primary price per kWh (ConsumptionRate of first connector, in major units)
+    // Some locations (e.g. certain supermarket chargers) come back with a blank name from the
+    // API — the operator (e.g. "Lidl") is the best stand-in, falling back further to the
+    // address if even that's blank, so there's always a usable title.
+    val displayName: String get() = name.ifBlank {
+        operator.name.ifBlank {
+            address.lineSequence().firstOrNull { it.isNotBlank() } ?: address
+        }
+    }
+
+    // Convenience: primary price per kWh, taken from an arbitrary connector (first in
+    // iteration order) at the location — correct-by-construction for CustomChargers (always
+    // exactly one connector), but a coarse fallback for multi-connector API locations where
+    // tiers can be priced differently. Prefer connectorPriceSummaries for tier-correct data.
     val pricePerKwh: Double? get() {
         return evses.edges
             .flatMap { it.node.connectors.edges }
-            .mapNotNull { edge ->
-                val rate = edge.node.priceComponents.firstOrNull { it.type == "ConsumptionRate" }
-                rate?.let { it.unitAmount?.toDouble()?.div(it.currencyDetails?.minorUnitConversion ?: 100) }
-            }
+            .mapNotNull { edge -> edge.node.priceComponents.amountMajorFor("ConsumptionRate", treatZeroAsNull = false) }
             .firstOrNull()
     }
 
@@ -85,32 +94,19 @@ data class ChargingLocation(
             ?.currencyDetails?.symbol
     }
 
-    val connectionFeeMajor: Double? get() {
-        return evses.edges
-            .flatMap { it.node.connectors.edges }
-            .mapNotNull { edge ->
-                val fee = edge.node.priceComponents.firstOrNull { it.type == "ConnectionFee" }
-                fee?.let {
-                    val amount = it.unitAmount ?: 0
-                    if (amount == 0) null
-                    else amount.toDouble() / (it.currencyDetails?.minorUnitConversion ?: 100)
-                }
-            }
-            .firstOrNull()
-    }
+    // Coarse, charger-wide fallback — see pricePerKwh's note above. Prefer
+    // connectorPriceSummaries for tier-correct data on multi-connector locations.
+    val connectionFeeMajor: Double? get() = evses.edges
+        .flatMap { it.node.connectors.edges }
+        .mapNotNull { edge -> edge.node.priceComponents.amountMajorFor("ConnectionFee") }
+        .firstOrNull()
 
     private fun timeRateForType(typeName: String): Double? = evses.edges
         .flatMap { it.node.connectors.edges }
-        .mapNotNull { edge ->
-            val rate = edge.node.priceComponents.firstOrNull { it.type == typeName }
-            rate?.let {
-                val amount = it.unitAmount ?: 0
-                if (amount == 0) null
-                else amount.toDouble() / (it.currencyDetails?.minorUnitConversion ?: 100)
-            }
-        }
+        .mapNotNull { edge -> edge.node.priceComponents.amountMajorFor(typeName) }
         .firstOrNull()
 
+    // Coarse, charger-wide fallbacks — see pricePerKwh's note above.
     val chargingTimeRateMajor: Double? get() = timeRateForType("TimeRate")
     val parkingTimeRateMajor: Double? get() = timeRateForType("ParkingTimeRate")
 
@@ -161,21 +157,25 @@ data class ChargingLocation(
         return evses.edges
             .flatMap { it.node.connectors.edges.map { e -> e.node } }
             .groupBy { connector ->
-                Triple(
-                    connector.standard?.humanName ?: "Unknown",
-                    connector.kilowatts,
-                    connector.priceComponents.firstOrNull { it.type == "ConsumptionRate" }
-                        ?.let { it.unitAmount?.toDouble()?.div(it.currencyDetails?.minorUnitConversion ?: 100) }
+                ConnectorPricingKey(
+                    type = connector.standard?.humanName ?: "Unknown",
+                    kilowatts = connector.kilowatts,
+                    pricePerKwh = connector.priceComponents.amountMajorFor("ConsumptionRate", treatZeroAsNull = false),
+                    connectionFeeMajor = connector.priceComponents.amountMajorFor("ConnectionFee"),
+                    chargingTimeRateMajor = connector.priceComponents.amountMajorFor("TimeRate"),
+                    parkingTimeRateMajor = connector.priceComponents.amountMajorFor("ParkingTimeRate")
                 )
             }
             .map { (key, connectors) ->
-                val (type, kw, price) = key
                 ConnectorPriceSummary(
-                    type = type,
-                    kilowatts = kw,
-                    pricePerKwh = price,
+                    type = key.type,
+                    kilowatts = key.kilowatts,
+                    pricePerKwh = key.pricePerKwh,
                     isFree = connectors.first().isChargingFree,
-                    count = connectors.size
+                    count = connectors.size,
+                    connectionFeeMajor = key.connectionFeeMajor,
+                    chargingTimeRateMajor = key.chargingTimeRateMajor,
+                    parkingTimeRateMajor = key.parkingTimeRateMajor
                 )
             }
             .sortedByDescending { it.kilowatts ?: 0.0 }
@@ -259,8 +259,35 @@ data class ConnectorPriceSummary(
     val kilowatts: Double?,
     val pricePerKwh: Double?,
     val isFree: Boolean,
-    val count: Int
+    val count: Int,
+    val connectionFeeMajor: Double? = null,
+    val chargingTimeRateMajor: Double? = null,
+    val parkingTimeRateMajor: Double? = null
 )
+
+// Grouping key for connectorPriceSummaries: connectors merge into one summary row only when
+// ALL of these match, so tiers that differ in any price dimension (e.g. two connectors with
+// the same kW/kWh-price but different per-minute rates) are kept as separate rows.
+private data class ConnectorPricingKey(
+    val type: String,
+    val kilowatts: Double?,
+    val pricePerKwh: Double?,
+    val connectionFeeMajor: Double?,
+    val chargingTimeRateMajor: Double?,
+    val parkingTimeRateMajor: Double?
+)
+
+// Extracts one price component's amount in major currency units (e.g. cents -> euros).
+// For fee-style components (ConnectionFee/TimeRate/ParkingTimeRate) a 0 amount means "this
+// fee doesn't apply here" so it's treated as absent (null). ConsumptionRate is different: a
+// genuine €0.00/kWh price is common for locations billed purely by time, and 0.0 is a valid
+// price there, not "no price" — callers for that type must pass treatZeroAsNull = false.
+private fun List<PriceComponentDto>.amountMajorFor(typeName: String, treatZeroAsNull: Boolean = true): Double? {
+    val comp = firstOrNull { it.type == typeName } ?: return null
+    val amount = comp.unitAmount ?: 0
+    if (treatZeroAsNull && amount == 0) return null
+    return amount.toDouble() / (comp.currencyDetails?.minorUnitConversion ?: 100)
+}
 
 data class ConnectorStandard(
     val pk: Long,

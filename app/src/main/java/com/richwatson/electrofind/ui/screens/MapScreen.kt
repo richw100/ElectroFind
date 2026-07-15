@@ -629,17 +629,20 @@ fun ChargerMapView(
             when (priceMode) {
                 MapPriceMode.PER_KWH -> charger.pricePerKwh
                 else -> {
-                    val kw = charger.maxKilowatts ?: return@map null
-                    val price = charger.pricePerKwh ?: return@map null
+                    // Score using the fastest tier's own price/fees together, rather than
+                    // mixing maxKilowatts with a possibly-different tier's rate.
+                    val fastest = charger.connectorPriceSummaries.maxByOrNull { it.kilowatts ?: -1.0 } ?: return@map null
+                    val kw = fastest.kilowatts ?: return@map null
+                    val price = if (fastest.isFree) 0.0 else fastest.pricePerKwh ?: return@map null
                     if (session == null) return@map null
                     when (priceMode) {
                         MapPriceMode.OPTIMAL_COST -> {
                             val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, result.chargeMinutes, charger.gracePeriodMinutes)
+                            KonaChargeCurve.totalCost(result, price, fastest.connectionFeeMajor ?: 0.0, fastest.chargingTimeRateMajor ?: 0.0, fastest.parkingTimeRateMajor ?: 0.0, result.chargeMinutes, charger.gracePeriodMinutes)
                         }
                         MapPriceMode.STAY_COST -> {
                             val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                            KonaChargeCurve.totalCost(result, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
+                            KonaChargeCurve.totalCost(result, price, fastest.connectionFeeMajor ?: 0.0, fastest.chargingTimeRateMajor ?: 0.0, fastest.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
                         }
                         else -> null
                     }
@@ -687,7 +690,7 @@ fun ChargerMapView(
 
             // Multi-row badge: one row per distinct price, showing only the fastest connector at that price
             val summaries = charger.connectorPriceSummaries
-                .groupBy { it.pricePerKwh to it.isFree }
+                .groupBy { listOf(it.pricePerKwh, it.isFree, it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
                 .map { (_, group) -> group.first() }  // first() is fastest (already sorted desc by kW)
                 .sortedByDescending { it.kilowatts ?: 0.0 }
                 .take(4)
@@ -706,8 +709,8 @@ fun ChargerMapView(
                             )
                             val stayMins = if (priceMode == MapPriceMode.STAY_COST) session.stayMinutes.toDouble() else sim.chargeMinutes
                             val cost = KonaChargeCurve.totalCost(sim, s.pricePerKwh,
-                                charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0,
-                                charger.parkingTimeRateMajor ?: 0.0, stayMins, charger.gracePeriodMinutes)
+                                s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0,
+                                s.parkingTimeRateMajor ?: 0.0, stayMins, charger.gracePeriodMinutes)
                             "%s%.2f".format(cur, cost)
                         }
                         s.pricePerKwh != null -> "%s%.2f".format(cur, s.pricePerKwh)
@@ -727,7 +730,7 @@ fun ChargerMapView(
             val markerIsStale = isStaleForRefresh(charger.cachedAt, refreshPeriodMs)
             val marker = Marker(mapView).apply {
                 position = GeoPoint(charger.coordinates.latitude, charger.coordinates.longitude)
-                title = (if (markerIsStale) "! " else "") + charger.name
+                title = (if (markerIsStale) "! " else "") + charger.displayName
                 snippet = buildString {
                     charger.pricePerKwh?.let { append("%s%.2f/kWh · ".format(cur, it)) }
                     append(charger.operator.name)
@@ -834,7 +837,7 @@ fun ChargerMapView(
     dialogCharger?.let { charger ->
         AlertDialog(
             onDismissRequest = { dialogChargerPk = null },
-            title = { Text(staleWarningPrefixed(charger.name, isStaleForRefresh(charger.cachedAt, refreshPeriodMs))) },
+            title = { Text(staleWarningPrefixed(charger.displayName, isStaleForRefresh(charger.cachedAt, refreshPeriodMs))) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -918,14 +921,27 @@ fun ChargerMapView(
                             )
                         }
                     }
-                    charger.connectionFeeMajor?.let {
-                        Text("+ %s%.2f connection fee".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    charger.chargingTimeRateMajor?.let {
-                        Text("+ %s%.2f/min while charging".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    charger.parkingTimeRateMajor?.let {
-                        Text("+ %s%.2f/min idle fee".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    run {
+                        val dialogFeeGroups = charger.connectorPriceSummaries
+                            .filter { it.connectionFeeMajor != null || it.chargingTimeRateMajor != null || it.parkingTimeRateMajor != null }
+                            .groupBy { Triple(it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
+                            .map { (_, group) ->
+                                group.maxByOrNull { it.kilowatts ?: 0.0 }!! to
+                                    group.mapNotNull { it.kilowatts?.toInt() }.distinct().sorted()
+                            }
+                        val multiDialogFeeGroup = dialogFeeGroups.size > 1
+                        dialogFeeGroups.forEach { (s, kws) ->
+                            val prefix = if (multiDialogFeeGroup) "${kws.joinToString("/")}kW " else ""
+                            s.connectionFeeMajor?.let {
+                                Text("$prefix+ %s%.2f connection fee".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            s.chargingTimeRateMajor?.let {
+                                Text("$prefix+ %s%.2f/min while charging".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            s.parkingTimeRateMajor?.let {
+                                Text("$prefix+ %s%.2f/min idle fee".format(dialogCur, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                     // Unified per-speed: availability + session cost
                     val popupPriceGroups = charger.connectorPriceSummaries
@@ -960,9 +976,9 @@ fun ChargerMapView(
                             if (session != null && pg != null) {
                                 val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
                                 val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                                val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes)
+                                val optCost = KonaChargeCurve.totalCost(optResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes)
                                 val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                                val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
+                                val stayCost = KonaChargeCurve.totalCost(stayResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
                                 val optMins = optResult.chargeMinutes.toInt()
                                 val optSoc = optResult.endSocPercent.toInt()
                                 val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
@@ -989,7 +1005,7 @@ fun ChargerMapView(
                     val lng = charger.coordinates.longitude
                     TextButton(
                         onClick = {
-                            val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
+                            val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.displayName})")
                             context.startActivity(Intent(Intent.ACTION_VIEW, uri))
                             dialogChargerPk = null
                         },

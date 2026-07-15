@@ -691,7 +691,7 @@ private fun RouteStopCard(
             } else {
                 // Charger name + operator
                 Text(
-                    staleWarningPrefixed(charger.name, isStaleForRefresh(charger.cachedAt, refreshPeriodMs)),
+                    staleWarningPrefixed(charger.displayName, isStaleForRefresh(charger.cachedAt, refreshPeriodMs)),
                     style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium
                 )
                 Text(
@@ -719,18 +719,30 @@ private fun RouteStopCard(
                     }
                 }
 
-                // Time-based charges (charger-level, shown once below connector rows)
-                val ratesParts = listOfNotNull(
-                    charger.connectionFeeMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))} connection fee" },
-                    charger.chargingTimeRateMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))}/min charging" },
-                    charger.parkingTimeRateMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))}/min parking" }
-                )
-                if (ratesParts.isNotEmpty()) {
-                    Text(
-                        ratesParts.joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                // Time-based charges — grouped per connector tier, since different tiers at
+                // the same location can carry different per-minute/parking/connection rates.
+                val rpFeeGroups = charger.connectorPriceSummaries
+                    .filter { it.connectionFeeMajor != null || it.chargingTimeRateMajor != null || it.parkingTimeRateMajor != null }
+                    .groupBy { Triple(it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
+                    .map { (_, group) ->
+                        group.maxByOrNull { it.kilowatts ?: 0.0 }!! to
+                            group.mapNotNull { it.kilowatts?.toInt() }.distinct().sorted()
+                    }
+                val multiRpFeeGroup = rpFeeGroups.size > 1
+                rpFeeGroups.forEach { (s, kws) ->
+                    val prefix = if (multiRpFeeGroup) "${kws.joinToString("/")}kW " else ""
+                    val ratesParts = listOfNotNull(
+                        s.connectionFeeMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))} connection fee" },
+                        s.chargingTimeRateMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))}/min charging" },
+                        s.parkingTimeRateMajor?.let { "${displaySymbol}${"%.2f".format(conv(it))}/min parking" }
                     )
+                    if (ratesParts.isNotEmpty()) {
+                        Text(
+                            "$prefix${ratesParts.joinToString(" · ")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 // Unified per-speed: availability + session cost
@@ -762,9 +774,9 @@ private fun RouteStopCard(
                         if (pg != null) {
                             val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
                             val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
-                            val optCost = KonaChargeCurve.totalCost(optResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes)
+                            val optCost = KonaChargeCurve.totalCost(optResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes)
                             val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
-                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, charger.connectionFeeMajor ?: 0.0, charger.chargingTimeRateMajor ?: 0.0, charger.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
+                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
                             val optMins = optResult.chargeMinutes.toInt()
                             val optSoc = optResult.endSocPercent.toInt()
                             val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
@@ -815,7 +827,7 @@ private fun RouteStopCard(
                     val lng = charger.coordinates.longitude
                     TextButton(
                         onClick = {
-                            val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
+                            val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.displayName})")
                             context.startActivity(Intent(Intent.ACTION_VIEW, uri))
                         },
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)

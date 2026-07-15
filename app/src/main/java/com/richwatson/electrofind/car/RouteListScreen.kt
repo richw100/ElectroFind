@@ -272,11 +272,11 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             } else {
                 val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp, profile)
                 val warn = if (isStaleForRefresh(charger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
-                rowBuilder.addText(if (line1.isNotEmpty()) "$warn${charger.name} · $line1" else "$warn${charger.name}")
+                rowBuilder.addText(if (line1.isNotEmpty()) "$warn${charger.displayName} · $line1" else "$warn${charger.displayName}")
                 if (line2.isNotEmpty()) rowBuilder.addText(line2)
                 val lat = charger.coordinates.latitude
                 val lng = charger.coordinates.longitude
-                val mapsUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.name})")
+                val mapsUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(${charger.displayName})")
                 rowBuilder.addAction(
                     Action.Builder()
                         .setIcon(navigateIcon)
