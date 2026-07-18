@@ -21,6 +21,7 @@ import com.google.gson.reflect.TypeToken
 import com.richwatson.electrofind.ElectroFindApp
 import com.richwatson.electrofind.R
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.connectorPriceSummariesWithOverride
 import com.richwatson.electrofind.model.CarProfile
 import com.richwatson.electrofind.model.RouteStop
 import com.richwatson.electrofind.model.Trip
@@ -232,7 +233,7 @@ class StopDetailScreen(
         onMakePrimary: () -> Unit,
         profile: CarProfile
     ): Row {
-        val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp, profile)
+        val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp, profile, tieredRateOverrideFor(prefs, charger.pk))
 
         val lat = charger.coordinates.latitude
         val lng = charger.coordinates.longitude
@@ -278,7 +279,7 @@ class StopDetailScreen(
                 val profile = activeCarProfile(carContext)
                 val availByKw = charger.availabilityByKw
                 val listBuilder = ItemList.Builder()
-                charger.connectorPriceSummaries.forEach { s ->
+                charger.connectorPriceSummariesWithOverride(tieredRateOverrideFor(prefs, charger.pk)).forEach { s ->
                     val kwInt = s.kilowatts?.toInt()
                     val (avail, inUse, fault) = kwInt?.let { availByKw[it] } ?: Triple(0, 0, 0)
                     val total = avail + inUse + fault

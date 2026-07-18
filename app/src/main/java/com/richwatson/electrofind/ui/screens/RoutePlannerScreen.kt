@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.connectorPriceSummariesWithOverride
 import com.richwatson.electrofind.util.formatDurationMinutes
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
@@ -212,6 +213,7 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
                             convertToGbp = state.convertToGbp,
                             allChargers = state.routeChargers,
                             refreshPeriodMs = state.refreshPeriodMs,
+                            tieredRateOverride = charger?.let { state.tieredRateOverrides[it.pk] },
                             onMoveUp = { chargerViewModel.moveRouteStop(stop.id, -1) },
                             onMoveDown = { chargerViewModel.moveRouteStop(stop.id, +1) },
                             onRemove = {
@@ -233,6 +235,9 @@ fun RoutePlannerScreen(chargerViewModel: ChargerViewModel, onShowOnMap: (Long) -
                             onNameChanged = { chargerViewModel.updateRouteStopName(stop.id, it) },
                             onNotesChanged = { chargerViewModel.updateRouteStopNotes(stop.id, it) },
                             onEditSession = { editStop = stop },
+                            onSetTieredRateOverride = charger?.let { c ->
+                                { tiers: List<com.richwatson.electrofind.api.models.RateTier> -> chargerViewModel.setTieredRateOverride(c.pk, tiers) }
+                            },
                             onShowOnMap = { charger?.let { onShowOnMap(it.pk) } },
                             onToggleFavourite = { chargerViewModel.toggleFavourite(stop.activePk) },
                             onToggleExcluded = { chargerViewModel.toggleExcluded(stop.activePk) },
@@ -553,11 +558,14 @@ private fun RouteStopCard(
     isFavourite: Boolean,
     isExcluded: Boolean,
     onCopyStop: (() -> Unit)? = null,
-    onAddAsAlternative: (() -> Unit)? = null
+    onAddAsAlternative: (() -> Unit)? = null,
+    tieredRateOverride: com.richwatson.electrofind.api.models.TieredRateOverride? = null,
+    onSetTieredRateOverride: ((List<com.richwatson.electrofind.api.models.RateTier>) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var nameText by remember(stop.id) { mutableStateOf(stop.customName ?: "") }
     var notesText by remember(stop.id) { mutableStateOf(stop.notes ?: "") }
+    var showTieredRateDialog by remember { mutableStateOf(false) }
     val contentColor = MaterialTheme.colorScheme.onSurface
     val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -702,7 +710,8 @@ private fun RouteStopCard(
 
                 // Connector prices
                 val rpAvailByKw = charger.availabilityByKw
-                charger.connectorPriceSummaries.forEach { summary ->
+                val rpSummaries = charger.connectorPriceSummariesWithOverride(tieredRateOverride)
+                rpSummaries.forEach { summary ->
                     val typeLabel = if (summary.count > 1) "${summary.type} ×${summary.count}" else summary.type
                     val kwLabel = summary.kilowatts?.let { kw ->
                         if (kw % 1.0 == 0.0) "${kw.toInt()} kW" else "%.1f kW".format(kw)
@@ -721,9 +730,9 @@ private fun RouteStopCard(
 
                 // Time-based charges — grouped per connector tier, since different tiers at
                 // the same location can carry different per-minute/parking/connection rates.
-                val rpFeeGroups = charger.connectorPriceSummaries
-                    .filter { it.connectionFeeMajor != null || it.chargingTimeRateMajor != null || it.parkingTimeRateMajor != null }
-                    .groupBy { Triple(it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
+                val rpFeeGroups = rpSummaries
+                    .filter { it.connectionFeeMajor != null || it.chargingTimeRateMajor != null || it.parkingTimeRateMajor != null || it.chargingTimeRateTiers.isNotEmpty() }
+                    .groupBy { listOf(it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor, it.chargingTimeRateTiers) }
                     .map { (_, group) ->
                         group.maxByOrNull { it.kilowatts ?: 0.0 }!! to
                             group.mapNotNull { it.kilowatts?.toInt() }.distinct().sorted()
@@ -743,11 +752,26 @@ private fun RouteStopCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    s.chargingTimeRateTiers.forEach { tier ->
+                        Text(
+                            "$prefix${tier.describe(displaySymbol)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (onSetTieredRateOverride != null) {
+                    TextButton(onClick = { showTieredRateDialog = true }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                        Text(
+                            if (tieredRateOverride == null) "Add time-based rate" else "Edit time-based rate",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 }
 
                 // Unified per-speed: availability + session cost
                 val session = ChargeSession(stop.arrivalSocPercent, stop.departureSocPercent, stop.stayMinutes)
-                val priceGroups = charger.connectorPriceSummaries
+                val priceGroups = rpSummaries
                     .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
                     .groupBy { it.kilowatts }
                     .map { (_, group) -> group.first() }
@@ -774,9 +798,9 @@ private fun RouteStopCard(
                         if (pg != null) {
                             val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
                             val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
-                            val optCost = KonaChargeCurve.totalCost(optResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes)
+                            val optCost = KonaChargeCurve.totalCost(optResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes, pg.chargingTimeRateTiers, stop.arrivalTimeMinutes)
                             val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
-                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes)
+                            val stayCost = KonaChargeCurve.totalCost(stayResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes, pg.chargingTimeRateTiers, stop.arrivalTimeMinutes)
                             val optMins = optResult.chargeMinutes.toInt()
                             val optSoc = optResult.endSocPercent.toInt()
                             val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
@@ -885,6 +909,14 @@ private fun RouteStopCard(
                 )
             }
         }
+    }
+    if (showTieredRateDialog && onSetTieredRateOverride != null) {
+        TieredRateOverrideDialog(
+            initial = tieredRateOverride?.tiers?.firstOrNull(),
+            onDismiss = { showTieredRateDialog = false },
+            onSave = { tier -> onSetTieredRateOverride(listOfNotNull(tier)); showTieredRateDialog = false },
+            onRemove = { onSetTieredRateOverride(emptyList()); showTieredRateDialog = false }
+        )
     }
 }
 

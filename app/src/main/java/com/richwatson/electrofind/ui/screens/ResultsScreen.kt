@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Favorite
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +38,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.compose.ui.unit.dp
 import com.richwatson.electrofind.api.models.ChargingLocation
+import com.richwatson.electrofind.api.models.connectorPriceSummariesWithOverride
 import com.richwatson.electrofind.util.formatDurationMinutes
 import com.richwatson.electrofind.api.models.timeAgo
 import com.richwatson.electrofind.api.models.isStaleForRefresh
@@ -176,7 +179,10 @@ fun ResultsScreen(
                             onToggleFavourite = { chargerViewModel.toggleFavourite(charger.pk) },
                             onToggleExcluded = { chargerViewModel.toggleExcluded(charger.pk) },
                             onAddToRoute = { pk -> tripPickerPk = pk },
-                            onEditCustomCharger = if (charger.pk < 0) { { onEditCustomCharger?.invoke(charger.pk) } } else null
+                            onEditCustomCharger = if (charger.pk < 0) { { onEditCustomCharger?.invoke(charger.pk) } } else null,
+                            tieredRateOverride = state.tieredRateOverrides[charger.pk],
+                            sessionStartMinuteOfDay = state.sessionStartOverrideMinutes ?: KonaChargeCurve.currentMinuteOfDay(),
+                            onSetTieredRateOverride = { tiers -> chargerViewModel.setTieredRateOverride(charger.pk, tiers) }
                         )
                     }
                 }
@@ -547,8 +553,12 @@ private fun ChargerCard(
     onToggleFavourite: () -> Unit = {},
     onToggleExcluded: () -> Unit = {},
     onAddToRoute: ((Long) -> Unit)? = null,
-    onEditCustomCharger: (() -> Unit)? = null
+    onEditCustomCharger: (() -> Unit)? = null,
+    tieredRateOverride: com.richwatson.electrofind.api.models.TieredRateOverride? = null,
+    sessionStartMinuteOfDay: Int = KonaChargeCurve.currentMinuteOfDay(),
+    onSetTieredRateOverride: ((List<com.richwatson.electrofind.api.models.RateTier>) -> Unit)? = null
 ) {
+    var showTieredRateDialog by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -634,14 +644,15 @@ private fun ChargerCard(
 
             Spacer(Modifier.height(4.dp))
             val availByKw = charger.availabilityByKw
-            charger.connectorPriceSummaries.forEach { summary ->
+            val summaries = charger.connectorPriceSummariesWithOverride(tieredRateOverride)
+            summaries.forEach { summary ->
                 ConnectorPriceRow(summary, currencySymbol, availByKw)
             }
 
             run {
-                val feeGroups = charger.connectorPriceSummaries
-                    .filter { it.connectionFeeMajor != null || it.chargingTimeRateMajor != null || it.parkingTimeRateMajor != null }
-                    .groupBy { Triple(it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
+                val feeGroups = summaries
+                    .filter { it.connectionFeeMajor != null || it.chargingTimeRateMajor != null || it.parkingTimeRateMajor != null || it.chargingTimeRateTiers.isNotEmpty() }
+                    .groupBy { listOf(it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor, it.chargingTimeRateTiers) }
                     .map { (_, group) ->
                         group.maxByOrNull { it.kilowatts ?: 0.0 }!! to
                             group.mapNotNull { it.kilowatts?.toInt() }.distinct().sorted()
@@ -663,6 +674,13 @@ private fun ChargerCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    s.chargingTimeRateTiers.forEach { tier ->
+                        Text(
+                            "$prefix${tier.describe(currencySymbol)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     s.parkingTimeRateMajor?.let { rate ->
                         Text(
                             "$prefix+ %s%.2f/min idle fee".format(currencySymbol, rate),
@@ -672,9 +690,17 @@ private fun ChargerCard(
                     }
                 }
             }
+            if (onSetTieredRateOverride != null) {
+                TextButton(onClick = { showTieredRateDialog = true }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                    Text(
+                        if (tieredRateOverride == null) "Add time-based rate" else "Edit time-based rate",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
             if (session != null) {
-                val priceGroups = charger.connectorPriceSummaries
-                    .groupBy { listOf(it.pricePerKwh, it.isFree, it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor) }
+                val priceGroups = summaries
+                    .groupBy { listOf(it.pricePerKwh, it.isFree, it.connectionFeeMajor, it.chargingTimeRateMajor, it.parkingTimeRateMajor, it.chargingTimeRateTiers) }
                     .map { (_, group) -> group.first() }
                     .sortedByDescending { it.kilowatts ?: 0.0 }
                     .filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
@@ -685,9 +711,9 @@ private fun ChargerCard(
                         val kw = s.kilowatts!!
                         val price = if (s.isFree) 0.0 else s.pricePerKwh!!
                         val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
-                        val optCost = KonaChargeCurve.totalCost(optResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes)
+                        val optCost = KonaChargeCurve.totalCost(optResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, chargingRateTiers = s.chargingTimeRateTiers, sessionStartMinuteOfDay = sessionStartMinuteOfDay)
                         val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
-                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble())
+                        val stayCost = KonaChargeCurve.totalCost(stayResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), chargingRateTiers = s.chargingTimeRateTiers, sessionStartMinuteOfDay = sessionStartMinuteOfDay)
                         val optMins = optResult.chargeMinutes.toInt()
                         val optSoc = optResult.endSocPercent.toInt()
                         val optLabel = "${formatDurationMinutes(optMins)} → ${optSoc}%"
@@ -788,6 +814,102 @@ private fun ChargerCard(
             }
         }
     }
+    if (showTieredRateDialog && onSetTieredRateOverride != null) {
+        TieredRateOverrideDialog(
+            initial = tieredRateOverride?.tiers?.firstOrNull(),
+            onDismiss = { showTieredRateDialog = false },
+            onSave = { tier -> onSetTieredRateOverride(listOfNotNull(tier)); showTieredRateDialog = false },
+            onRemove = { onSetTieredRateOverride(emptyList()); showTieredRateDialog = false }
+        )
+    }
+}
+
+// Manual conditional-rate entry: the Electroverse API has no structured way to express a
+// restricted/tiered rate (confirmed via schema introspection — TimeRate only ever carries a
+// single flat unitAmount), so a charger like "SAINT GILLES - Place Jean Jaures" (€0.10/min only
+// after the first 2h, only between 07:00-22:00) needs the user to enter the rule once here.
+// Not private: reused from the Map and Route Planner screens' charger popups too.
+@Composable
+internal fun TieredRateOverrideDialog(
+    initial: com.richwatson.electrofind.api.models.RateTier?,
+    onDismiss: () -> Unit,
+    onSave: (com.richwatson.electrofind.api.models.RateTier) -> Unit,
+    onRemove: () -> Unit
+) {
+    var rateText by remember { mutableStateOf(initial?.ratePerMinMajor?.let { "%.2f".format(it) } ?: "") }
+    var afterHours by remember { mutableStateOf(((initial?.afterMinutes ?: 0.0) / 60.0).let { if (it == it.toInt().toDouble()) it.toInt().toString() else "%.1f".format(it) }) }
+    var useWindow by remember { mutableStateOf(initial?.window != null) }
+    var windowStartHour by remember { mutableIntStateOf((initial?.window?.startMinuteOfDay ?: 420) / 60) }
+    var windowEndHour by remember { mutableIntStateOf((initial?.window?.endMinuteOfDay ?: 1320) / 60) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Time-based rate") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "For chargers that bill a per-minute rate only after a certain duration and/or only during certain hours (the Electroverse API doesn't expose this, so it's entered manually).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = rateText,
+                    onValueChange = { rateText = it },
+                    label = { Text("Rate per minute") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = afterHours,
+                    onValueChange = { afterHours = it },
+                    label = { Text("Applies after (hours)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Only during specific hours", style = MaterialTheme.typography.bodySmall)
+                    Switch(checked = useWindow, onCheckedChange = { useWindow = it })
+                }
+                if (useWindow) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(onClick = { if (windowStartHour > 0) windowStartHour-- }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Remove, contentDescription = "Earlier start", modifier = Modifier.size(16.dp))
+                        }
+                        Text("%02d:00".format(windowStartHour), style = MaterialTheme.typography.bodySmall)
+                        IconButton(onClick = { if (windowStartHour < 23) windowStartHour++ }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Add, contentDescription = "Later start", modifier = Modifier.size(16.dp))
+                        }
+                        Text("to", style = MaterialTheme.typography.bodySmall)
+                        IconButton(onClick = { if (windowEndHour > 0) windowEndHour-- }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Remove, contentDescription = "Earlier end", modifier = Modifier.size(16.dp))
+                        }
+                        Text("%02d:00".format(windowEndHour), style = MaterialTheme.typography.bodySmall)
+                        IconButton(onClick = { if (windowEndHour < 23) windowEndHour++ }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Add, contentDescription = "Later end", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val rate = rateText.toDoubleOrNull() ?: return@TextButton
+                val after = (afterHours.toDoubleOrNull() ?: 0.0) * 60.0
+                val window = if (useWindow) com.richwatson.electrofind.api.models.TimeWindow(windowStartHour * 60, windowEndHour * 60) else null
+                onSave(com.richwatson.electrofind.api.models.RateTier(rate, after, window))
+            }) { Text("Save") }
+        },
+        dismissButton = {
+            Row {
+                if (initial != null) {
+                    TextButton(onClick = onRemove) { Text("Remove") }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
 }
 
 @Composable

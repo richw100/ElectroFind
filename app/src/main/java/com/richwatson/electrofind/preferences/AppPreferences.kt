@@ -80,6 +80,16 @@ class AppPreferences(context: Context) {
         get() = prefs.getString("trips", "[]") ?: "[]"
         set(value) { prefs.edit().putString("trips", value).commit() }
 
+    var rawTieredRateOverrides: String
+        get() = prefs.getString("tiered_rate_overrides", "[]") ?: "[]"
+        set(value) { prefs.edit().putString("tiered_rate_overrides", value).commit() }
+
+    // -1 sentinel for "unset" (SharedPreferences has no nullable Int): unset means "use the
+    // live current time", distinct from a user-pinned time of 00:00.
+    var sessionStartOverrideMinutes: Int?
+        get() = prefs.getInt("session_start_override_minutes", -1).let { if (it < 0) null else it }
+        set(value) { prefs.edit().putInt("session_start_override_minutes", value ?: -1).apply() }
+
     var convertToGbp: Boolean
         get() = prefs.getBoolean("convert_to_gbp", false)
         set(value) { prefs.edit().putBoolean("convert_to_gbp", value).apply() }

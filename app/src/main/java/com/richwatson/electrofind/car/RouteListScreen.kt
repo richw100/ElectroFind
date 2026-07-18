@@ -270,7 +270,7 @@ class RouteListScreen(carContext: CarContext) : Screen(carContext) {
             if (charger == null) {
                 rowBuilder.addText("Loading…")
             } else {
-                val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp, profile)
+                val (line1, line2) = charger.chargerDetailLines(stop, prefs.convertToGbp, profile, tieredRateOverrideFor(prefs, charger.pk))
                 val warn = if (isStaleForRefresh(charger.cachedAt, prefs.refreshPeriodMs)) "! " else ""
                 rowBuilder.addText(if (line1.isNotEmpty()) "$warn${charger.displayName} · $line1" else "$warn${charger.displayName}")
                 if (line2.isNotEmpty()) rowBuilder.addText(line2)

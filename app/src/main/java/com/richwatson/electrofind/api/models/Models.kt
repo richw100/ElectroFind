@@ -262,8 +262,64 @@ data class ConnectorPriceSummary(
     val count: Int,
     val connectionFeeMajor: Double? = null,
     val chargingTimeRateMajor: Double? = null,
-    val parkingTimeRateMajor: Double? = null
+    val parkingTimeRateMajor: Double? = null,
+    val chargingTimeRateTiers: List<RateTier> = emptyList()
 )
+
+// A time-of-day window in minutes-since-midnight. Handles windows that cross midnight
+// (start > end, e.g. 22:00-07:00) by treating membership as "outside [end, start)" instead.
+data class TimeWindow(val startMinuteOfDay: Int, val endMinuteOfDay: Int) {
+    fun contains(minuteOfDay: Int): Boolean {
+        val m = ((minuteOfDay % 1440) + 1440) % 1440
+        return if (startMinuteOfDay <= endMinuteOfDay) m in startMinuteOfDay until endMinuteOfDay
+        else m >= startMinuteOfDay || m < endMinuteOfDay
+    }
+}
+
+// One billing tier for a per-minute charging rate: applies once `afterMinutes` of the session's
+// charging time have elapsed, and (if `window` is set) only while the wall-clock time also falls
+// within that time-of-day window. Needed because the Electroverse API has no structured way to
+// express a conditional/restricted rate (confirmed via live schema introspection — TimeRate only
+// ever carries a single flat unitAmount, no eligibility fields) — see e.g. "SAINT GILLES - Place
+// Jean Jaures", which bills €0.10/min only after the first 2h, and only between 07:00-22:00.
+data class RateTier(
+    val ratePerMinMajor: Double,
+    val afterMinutes: Double = 0.0,
+    val window: TimeWindow? = null
+) {
+    fun describe(currencySymbol: String): String {
+        val afterPart = if (afterMinutes > 0) " after ${formatTierDuration(afterMinutes)}" else ""
+        val windowPart = window?.let {
+            " (%02d:%02d-%02d:%02d)".format(it.startMinuteOfDay / 60, it.startMinuteOfDay % 60, it.endMinuteOfDay / 60, it.endMinuteOfDay % 60)
+        } ?: ""
+        return "+ %s%.2f/min%s%s".format(currencySymbol, ratePerMinMajor, afterPart, windowPart)
+    }
+}
+
+private fun formatTierDuration(minutes: Double): String {
+    val m = minutes.toInt()
+    return when {
+        m < 60 -> "${m}m"
+        m % 60 == 0 -> "${m / 60}h"
+        else -> "${m / 60}h${m % 60}m"
+    }
+}
+
+// A user-entered conditional rate rule for one charging location, since the API can't express
+// this structurally. Keyed by ChargingLocation.pk.
+data class TieredRateOverride(
+    val chargingLocationPk: Long,
+    val tiers: List<RateTier>
+)
+
+// Merges a user-entered override on top of the API-derived summaries. Overrides are
+// location-wide (every connector at the location gets the same tiers appended) since we've only
+// seen this apply uniformly across a location's connectors.
+fun ChargingLocation.connectorPriceSummariesWithOverride(override: TieredRateOverride?): List<ConnectorPriceSummary> {
+    val base = connectorPriceSummaries
+    if (override == null || override.tiers.isEmpty()) return base
+    return base.map { it.copy(chargingTimeRateTiers = it.chargingTimeRateTiers + override.tiers) }
+}
 
 // Grouping key for connectorPriceSummaries: connectors merge into one summary row only when
 // ALL of these match, so tiers that differ in any price dimension (e.g. two connectors with

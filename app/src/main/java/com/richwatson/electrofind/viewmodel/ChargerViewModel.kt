@@ -22,6 +22,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import com.richwatson.electrofind.api.models.ChargingLocation
 import com.richwatson.electrofind.api.models.LocationSuggestion
+import com.richwatson.electrofind.api.models.RateTier
+import com.richwatson.electrofind.api.models.TieredRateOverride
+import com.richwatson.electrofind.api.models.connectorPriceSummariesWithOverride
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.ChargerRepository
 import kotlinx.coroutines.Job
@@ -88,7 +91,11 @@ data class SearchState(
     val routeChargersRefreshedAt: Long? = null,
     val customChargers: List<ChargingLocation> = emptyList(),
     val rawCustomChargers: List<CustomCharger> = emptyList(),
-    val convertToGbp: Boolean = false
+    val convertToGbp: Boolean = false,
+    // null = use the live current time when estimating a session starting now; a non-null value
+    // is an explicit user override (set via Settings) to plan for a specific time of day instead.
+    val sessionStartOverrideMinutes: Int? = null,
+    val tieredRateOverrides: Map<Long, TieredRateOverride> = emptyMap()
 ) {
     val isLoading: Boolean get() = isLoadingEv
     val routeStops: List<RouteStop>
@@ -138,7 +145,9 @@ class ChargerViewModel(
                 activeProfile = activeProfile,
                 favouritePks = appPreferences.favouritePks,
                 excludedPks = appPreferences.excludedPks,
-                convertToGbp = appPreferences.convertToGbp
+                convertToGbp = appPreferences.convertToGbp,
+                sessionStartOverrideMinutes = appPreferences.sessionStartOverrideMinutes,
+                tieredRateOverrides = loadTieredRateOverrides()
             )
         }
         loadFavouriteChargers(appPreferences.favouritePks)
@@ -473,6 +482,43 @@ class ChargerViewModel(
         appPreferences.targetSocPercent = targetSoc
         appPreferences.stayMinutes = stayMinutes
         _state.update { it.copy(startSocPercent = startSoc, targetSocPercent = targetSoc, stayMinutes = stayMinutes) }
+    }
+
+    fun setSessionStartOverride(minutes: Int?) {
+        appPreferences.sessionStartOverrideMinutes = minutes
+        _state.update { it.copy(sessionStartOverrideMinutes = minutes) }
+    }
+
+    // ── Tiered rate overrides ────────────────────────────────────────────────
+    // Manual per-charger conditional-rate rules the user enters, since the API has no
+    // structured way to express a restricted/tiered rate (confirmed via schema introspection).
+
+    private fun loadTieredRateOverrides(): Map<Long, TieredRateOverride> {
+        return try {
+            val type = object : TypeToken<List<TieredRateOverride>>() {}.type
+            val list: List<TieredRateOverride>? = gson.fromJson(appPreferences.rawTieredRateOverrides, type)
+            (list ?: emptyList()).associateBy { it.chargingLocationPk }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun saveTieredRateOverrides(overrides: Map<Long, TieredRateOverride>) {
+        appPreferences.rawTieredRateOverrides = gson.toJson(overrides.values.toList())
+    }
+
+    fun setTieredRateOverride(pk: Long, tiers: List<RateTier>) {
+        val updated = _state.value.tieredRateOverrides.toMutableMap()
+        if (tiers.isEmpty()) updated.remove(pk) else updated[pk] = TieredRateOverride(pk, tiers)
+        saveTieredRateOverrides(updated)
+        _state.update { it.copy(tieredRateOverrides = updated) }
+    }
+
+    fun removeTieredRateOverride(pk: Long) {
+        val updated = _state.value.tieredRateOverrides.toMutableMap()
+        updated.remove(pk)
+        saveTieredRateOverrides(updated)
+        _state.update { it.copy(tieredRateOverrides = updated) }
     }
 
     // ── Custom chargers ──────────────────────────────────────────────────────
@@ -976,8 +1022,10 @@ class ChargerViewModel(
 // maxKilowatts with a possibly-different tier's price, which could silently pick the wrong pair
 // at multi-tier locations (e.g. a 22kW connector at €0.08/min vs a 7kW connector at €0.04/min).
 private fun ChargingLocation.simCost(state: SearchState, stayMinutes: Double?): Double? {
-    val tiers = connectorPriceSummaries.filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
+    val override = state.tieredRateOverrides[pk]
+    val tiers = connectorPriceSummariesWithOverride(override).filter { it.kilowatts != null && (it.pricePerKwh != null || it.isFree) }
     if (tiers.isEmpty()) return null
+    val sessionStartMinuteOfDay = state.sessionStartOverrideMinutes ?: KonaChargeCurve.currentMinuteOfDay()
     return tiers.mapNotNull { tier ->
         val kw = tier.kilowatts!!
         val price = if (tier.isFree) 0.0 else tier.pricePerKwh!!
@@ -995,7 +1043,9 @@ private fun ChargingLocation.simCost(state: SearchState, stayMinutes: Double?): 
             chargingRatePerMin = tier.chargingTimeRateMajor ?: 0.0,
             parkingRatePerMin = tier.parkingTimeRateMajor ?: 0.0,
             stayMinutes = stayMinutes ?: result.chargeMinutes,
-            gracePeriodMinutes = gracePeriodMinutes
+            gracePeriodMinutes = gracePeriodMinutes,
+            chargingRateTiers = tier.chargingTimeRateTiers,
+            sessionStartMinuteOfDay = sessionStartMinuteOfDay
         )
     }.minOrNull()
 }

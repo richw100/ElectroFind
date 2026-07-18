@@ -7,8 +7,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EvStation
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -37,6 +39,13 @@ fun SettingsScreen(
     var localTargetSoc by remember(state.targetSocPercent) { mutableIntStateOf(state.targetSocPercent) }
     var localStayMins by remember(state.stayMinutes) { mutableIntStateOf(state.stayMinutes) }
     var profileDropdownExpanded by remember { mutableStateOf(false) }
+    val useCurrentTime = state.sessionStartOverrideMinutes == null
+    var startHour by remember(state.sessionStartOverrideMinutes) {
+        mutableIntStateOf((state.sessionStartOverrideMinutes ?: 720) / 60)
+    }
+    var startHalf by remember(state.sessionStartOverrideMinutes) {
+        mutableStateOf((state.sessionStartOverrideMinutes ?: 720) % 60 >= 30)
+    }
 
     Scaffold(
         topBar = {
@@ -124,6 +133,45 @@ fun SettingsScreen(
                 steps = 143,
                 modifier = Modifier.fillMaxWidth()
             )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Use current time", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Switch(
+                    checked = useCurrentTime,
+                    onCheckedChange = { checked ->
+                        chargerViewModel.setSessionStartOverride(if (checked) null else startHour * 60 + if (startHalf) 30 else 0)
+                    }
+                )
+            }
+            if (!useCurrentTime) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Start time:", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    IconButton(onClick = {
+                        if (startHour > 0) startHour--
+                        chargerViewModel.setSessionStartOverride(startHour * 60 + if (startHalf) 30 else 0)
+                    }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Remove, contentDescription = "Earlier", modifier = Modifier.size(16.dp))
+                    }
+                    Text("%02d:%s".format(startHour, if (startHalf) "30" else "00"), style = MaterialTheme.typography.bodySmall)
+                    IconButton(onClick = {
+                        if (startHour < 23) startHour++
+                        chargerViewModel.setSessionStartOverride(startHour * 60 + if (startHalf) 30 else 0)
+                    }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Add, contentDescription = "Later", modifier = Modifier.size(16.dp))
+                    }
+                    FilterChip(
+                        selected = startHalf,
+                        onClick = {
+                            startHalf = !startHalf
+                            chargerViewModel.setSessionStartOverride(startHour * 60 + if (startHalf) 30 else 0)
+                        },
+                        label = { Text(if (startHalf) ":30" else ":00", style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
 
             HorizontalDivider()
 

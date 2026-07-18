@@ -1,5 +1,6 @@
 package com.richwatson.electrofind.util
 
+import com.richwatson.electrofind.api.models.RateTier
 import com.richwatson.electrofind.model.CarProfile
 
 object KonaChargeCurve {
@@ -204,16 +205,54 @@ object KonaChargeCurve {
         chargingRatePerMin: Double = 0.0,
         parkingRatePerMin: Double = 0.0,
         stayMinutes: Double = result.chargeMinutes,
-        gracePeriodMinutes: Double = 0.0
+        gracePeriodMinutes: Double = 0.0,
+        chargingRateTiers: List<RateTier> = emptyList(),
+        sessionStartMinuteOfDay: Int? = null
     ): Double {
         val chargeMin = result.chargeMinutes
         val idleMin = (stayMinutes - chargeMin).coerceAtLeast(0.0)
         val billableChargeMin = (chargeMin - gracePeriodMinutes).coerceAtLeast(0.0)
         val remainingGrace = (gracePeriodMinutes - chargeMin).coerceAtLeast(0.0)
         val billableIdleMin = (idleMin - remainingGrace).coerceAtLeast(0.0)
+        // Tiered rates are conditional on total time connected (charging or not — this is how
+        // overstay/time-based tariffs like SAINT GILLES's "€0.10/min after 2h" actually work), so
+        // they're billed across the whole stay, replacing both the flat charging and idle rates
+        // rather than only the active-charging portion.
+        val (chargingCost, idleCost) = if (chargingRateTiers.isEmpty()) {
+            (chargingRatePerMin * billableChargeMin) to (parkingRatePerMin * billableIdleMin)
+        } else {
+            tieredChargingCost(stayMinutes, gracePeriodMinutes, chargingRateTiers, sessionStartMinuteOfDay ?: currentMinuteOfDay()) to 0.0
+        }
         return pricePerKwh * result.billedEnergyKwh +
                 connectionFee +
-                chargingRatePerMin * billableChargeMin +
-                parkingRatePerMin * billableIdleMin
+                chargingCost +
+                idleCost
+    }
+
+    fun currentMinuteOfDay(): Int {
+        val cal = java.util.Calendar.getInstance()
+        return cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+    }
+
+    // Minute-resolution billing pass so a conditional rate (duration threshold + time-of-day
+    // window) is evaluated independently for every minute of the session — this is what lets a
+    // session correctly span midnight, or cross in/out of the window more than once, without any
+    // special-casing: a minute simply bills at whichever tier (if any) currently applies to it.
+    private fun tieredChargingCost(totalMinutes: Double, gracePeriodMinutes: Double, tiers: List<RateTier>, sessionStartMinuteOfDay: Int): Double {
+        if (totalMinutes <= 0.0) return 0.0
+        val sortedTiers = tiers.sortedByDescending { it.afterMinutes }
+        fun rateAt(elapsedMinutes: Double): Double {
+            if (elapsedMinutes < gracePeriodMinutes) return 0.0
+            val tier = sortedTiers.firstOrNull { elapsedMinutes >= it.afterMinutes } ?: return 0.0
+            val clockMinute = ((sessionStartMinuteOfDay + elapsedMinutes.toInt()) % 1440 + 1440) % 1440
+            if (tier.window != null && !tier.window.contains(clockMinute)) return 0.0
+            return tier.ratePerMinMajor
+        }
+        val wholeMinutes = totalMinutes.toInt()
+        val fraction = totalMinutes - wholeMinutes
+        var cost = 0.0
+        for (m in 0 until wholeMinutes) cost += rateAt(m.toDouble())
+        if (fraction > 0.0) cost += rateAt(wholeMinutes.toDouble()) * fraction
+        return cost
     }
 }
