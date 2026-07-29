@@ -674,6 +674,28 @@ fun ChargerMapView(
         val colorGray   = android.graphics.Color.rgb(100, 100, 100)
         val colorFree   = android.graphics.Color.rgb(27, 94, 32)
 
+        // Shared value→colour mapping so a single-speed badge and a multi-speed row colour the
+        // same underlying number identically. Previously rows used fixed €0.35/€0.55 thresholds
+        // while the flat badge used this distribution-relative blend, so the same price could
+        // render a different colour depending on whether the charger had 1 or 2+ connector rows.
+        fun colourFor(value: Double?, isFreeValue: Boolean): Int {
+            if (isFreeValue) return colorFree
+            if (value == null) return colorGray
+            val fraction = when {
+                value <= 0.0 -> 0f
+                sortedPaidScores.size <= 1 -> 0f
+                else -> {
+                    val percentile = sortedPaidScores.count { it < value }.toFloat() / sortedPaidScores.size.toFloat()
+                    val linear = if (maxPaidScore > minPaidScore)
+                        ((value - minPaidScore) / (maxPaidScore - minPaidScore)).toFloat().coerceIn(0f, 1f)
+                    else 0f
+                    ((percentile + linear) / 2f).coerceIn(0f, 1f)
+                }
+            }
+            return if (fraction < 0.5f) lerpColor(colorGreen, colorOrange, fraction * 2f)
+            else lerpColor(colorOrange, colorRed, (fraction - 0.5f) * 2f)
+        }
+
         // Second pass: create markers
         chargers.forEachIndexed { idx, charger ->
             val score = scores[idx]
@@ -719,6 +741,7 @@ fun ChargerMapView(
             val rows: List<Pair<String, Int>>? = if (summaries.size < 2) null else {
                 summaries.map { s ->
                     val kwLabel = s.kilowatts?.let { "${it.toInt()}kW" } ?: "?kW"
+                    var rowValue: Double? = s.pricePerKwh
                     val priceLabel = when {
                         s.isFree -> "FREE"
                         session != null && s.kilowatts != null && s.pricePerKwh != null &&
@@ -734,18 +757,13 @@ fun ChargerMapView(
                                 s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0,
                                 s.parkingTimeRateMajor ?: 0.0, stayMins, charger.gracePeriodMinutes,
                                 s.chargingTimeRateTiers, sessionStartMinuteOfDay)
+                            rowValue = cost
                             "%s%.2f".format(cur, cost)
                         }
                         s.pricePerKwh != null -> "%s%.2f".format(cur, s.pricePerKwh)
                         else -> "?"
                     }
-                    val rowColor = when {
-                        s.isFree -> colorFree
-                        s.pricePerKwh == null -> colorGray
-                        s.pricePerKwh < 0.35 -> colorGreen
-                        s.pricePerKwh < 0.55 -> colorOrange
-                        else -> colorRed
-                    }
+                    val rowColor = colourFor(rowValue, s.isFree)
                     Pair("$kwLabel  $priceLabel", rowColor)
                 }
             }
