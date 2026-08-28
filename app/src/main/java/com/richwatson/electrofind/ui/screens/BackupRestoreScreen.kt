@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -51,6 +52,7 @@ import com.richwatson.electrofind.model.DataSet
 import com.richwatson.electrofind.model.MergeMode
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
+import com.richwatson.electrofind.viewmodel.TripLogViewModel
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -58,6 +60,7 @@ import java.time.LocalDate
 @Composable
 fun BackupRestoreScreen(
     chargerViewModel: ChargerViewModel,
+    tripLogViewModel: TripLogViewModel,
     onBack: () -> Unit
 ) {
     val state by chargerViewModel.state.collectAsState()
@@ -74,8 +77,12 @@ fun BackupRestoreScreen(
         DataSet.CUSTOM_CHARGERS to true,
         DataSet.FAVOURITES to true,
         DataSet.EXCLUDED to true,
-        DataSet.TRIPS to true
+        DataSet.TRIPS to true,
+        DataSet.TRIP_LOG to true
     ) }
+    // (sessionCount, customChargeCount) for the Trip-log export row
+    var tripLogCounts by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    LaunchedEffect(Unit) { tripLogCounts = runCatching { tripLogViewModel.counts() }.getOrNull() }
 
     // Import state
     var importJson by remember { mutableStateOf<String?>(null) }
@@ -86,14 +93,18 @@ fun BackupRestoreScreen(
     // Export launcher
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         result.data?.data?.let { uri ->
-            try {
-                val json = chargerViewModel.buildExportJson(exportSelected.filterValues { it }.keys)
-                context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
-                appPreferences.lastManualExportAt = System.currentTimeMillis()
-                lastManualExportAt = appPreferences.lastManualExportAt
-                scope.launch { snackbar.showSnackbar("Exported successfully") }
-            } catch (e: Exception) {
-                scope.launch { snackbar.showSnackbar("Export failed: ${e.message}") }
+            scope.launch {
+                try {
+                    val sets = exportSelected.filterValues { it }.keys
+                    val tripLog = if (DataSet.TRIP_LOG in sets) tripLogViewModel.buildBackup() else null
+                    val json = chargerViewModel.buildExportJson(sets, tripLog)
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                    appPreferences.lastManualExportAt = System.currentTimeMillis()
+                    lastManualExportAt = appPreferences.lastManualExportAt
+                    snackbar.showSnackbar("Exported successfully")
+                } catch (e: Exception) {
+                    snackbar.showSnackbar("Export failed: ${e.message}")
+                }
             }
         }
     }
@@ -115,6 +126,7 @@ fun BackupRestoreScreen(
                 if (preview.favouritePks != null) { importSelected[DataSet.FAVOURITES] = true; importModes[DataSet.FAVOURITES] = MergeMode.ADD_AND_OVERWRITE }
                 if (preview.excludedPks != null) { importSelected[DataSet.EXCLUDED] = true; importModes[DataSet.EXCLUDED] = MergeMode.ADD_AND_OVERWRITE }
                 if (preview.trips != null) { importSelected[DataSet.TRIPS] = true; importModes[DataSet.TRIPS] = MergeMode.ADD_AND_OVERWRITE }
+                if (preview.tripLog != null) { importSelected[DataSet.TRIP_LOG] = true; importModes[DataSet.TRIP_LOG] = MergeMode.ADD_AND_OVERWRITE }
             } catch (e: Exception) {
                 scope.launch { snackbar.showSnackbar("Could not read file: ${e.message}") }
             }
@@ -169,6 +181,12 @@ fun BackupRestoreScreen(
                         label = "${state.trips.size} trip${if (state.trips.size == 1) "" else "s"} ($stopCount stop${if (stopCount == 1) "" else "s"})",
                         checked = exportSelected[DataSet.TRIPS] == true,
                         onCheckedChange = { exportSelected[DataSet.TRIPS] = it }
+                    )
+                    val (sCount, cCount) = tripLogCounts ?: (0 to 0)
+                    ExportRow(
+                        label = "$sCount charge session${if (sCount == 1) "" else "s"} + $cCount manual charge${if (cCount == 1) "" else "s"}",
+                        checked = exportSelected[DataSet.TRIP_LOG] == true,
+                        onCheckedChange = { exportSelected[DataSet.TRIP_LOG] = it }
                     )
 
                     Spacer(Modifier.height(8.dp))
@@ -269,6 +287,15 @@ fun BackupRestoreScreen(
                                 onModeChange = { importModes[DataSet.TRIPS] = it }
                             )
                         }
+                        preview.tripLog?.let { tl ->
+                            ImportSection(
+                                label = "${tl.sessions.size} charge session${if (tl.sessions.size == 1) "" else "s"} + ${tl.customCharges.size} manual charge${if (tl.customCharges.size == 1) "" else "s"}",
+                                checked = importSelected[DataSet.TRIP_LOG] == true,
+                                mode = importModes[DataSet.TRIP_LOG] ?: MergeMode.ADD_AND_OVERWRITE,
+                                onCheckedChange = { importSelected[DataSet.TRIP_LOG] = it },
+                                onModeChange = { importModes[DataSet.TRIP_LOG] = it }
+                            )
+                        }
 
                         Spacer(Modifier.height(8.dp))
                         Button(
@@ -279,6 +306,9 @@ fun BackupRestoreScreen(
                                     .mapValues { (k, _) -> importModes[k] ?: MergeMode.ADD_AND_OVERWRITE }
                                 try {
                                     chargerViewModel.applyImport(json, opts)
+                                    opts[DataSet.TRIP_LOG]?.let { mode ->
+                                        importPreview?.tripLog?.let { tripLogViewModel.applyImport(it, mode) }
+                                    }
                                     scope.launch { snackbar.showSnackbar("Imported successfully") }
                                 } catch (e: Exception) {
                                     scope.launch { snackbar.showSnackbar("Import failed: ${e.message}") }

@@ -911,13 +911,17 @@ class ChargerViewModel(
         _state.update { it.copy(searchHistory = current) }
     }
 
-    fun buildExportJson(sets: Set<DataSet>): String {
+    fun buildExportJson(
+        sets: Set<DataSet>,
+        tripLog: com.richwatson.electrofind.model.TripLogBackup? = null
+    ): String {
         val s = _state.value
         val backup = BackupFile(
             customChargers = if (DataSet.CUSTOM_CHARGERS in sets) s.rawCustomChargers else null,
             favouritePks = if (DataSet.FAVOURITES in sets) s.favouritePks.toList() else null,
             excludedPks = if (DataSet.EXCLUDED in sets) s.excludedPks.toList() else null,
-            trips = if (DataSet.TRIPS in sets) s.trips else null
+            trips = if (DataSet.TRIPS in sets) s.trips else null,
+            tripLog = if (DataSet.TRIP_LOG in sets) tripLog else null
         )
         return gson.toJson(backup)
     }

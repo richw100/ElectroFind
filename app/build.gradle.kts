@@ -128,6 +128,12 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
+    // PDF text extraction (parsing Electroverse charge-session receipts for the Trip tab)
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
+    testImplementation("junit:junit:4.13.2")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

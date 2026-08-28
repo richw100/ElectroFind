@@ -6,8 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -40,9 +40,11 @@ import com.richwatson.electrofind.ui.screens.ResultsScreen
 import com.richwatson.electrofind.ui.screens.RoutePlannerScreen
 import com.richwatson.electrofind.ui.screens.SearchScreen
 import com.richwatson.electrofind.ui.screens.SettingsScreen
+import com.richwatson.electrofind.ui.screens.TripLogScreen
 import com.richwatson.electrofind.ui.theme.ElectroFindTheme
 import com.richwatson.electrofind.viewmodel.AuthViewModel
 import com.richwatson.electrofind.viewmodel.ChargerViewModel
+import com.richwatson.electrofind.viewmodel.TripLogViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -56,6 +58,13 @@ class MainActivity : ComponentActivity() {
         ViewModelProvider(this, factory {
             ChargerViewModel(app.repository, app.appPreferences, app, app.carProfileRepository)
         })[ChargerViewModel::class.java]
+    }
+
+    private val tripLogViewModel: TripLogViewModel by lazy {
+        val app = application as ElectroFindApp
+        ViewModelProvider(this, factory {
+            TripLogViewModel(app.tripLogRepository, app.appPreferences, app)
+        })[TripLogViewModel::class.java]
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,19 +106,7 @@ class MainActivity : ComponentActivity() {
                                     label = { Text("Search", fontSize = 10.sp) }
                                 )
                                 NavigationBarItem(
-                                    selected = currentRoute == "results",
-                                    enabled = hasResults,
-                                    onClick = {
-                                        navController.navigate("results") {
-                                            popUpTo("search")
-                                            launchSingleTop = true
-                                        }
-                                    },
-                                    icon = { Icon(Icons.AutoMirrored.Filled.List, null) },
-                                    label = { Text("List", fontSize = 10.sp) }
-                                )
-                                NavigationBarItem(
-                                    selected = currentRoute in listOf("results_map", "browse_map"),
+                                    selected = currentRoute in listOf("results_map", "browse_map", "results"),
                                     onClick = {
                                         val dest = if (hasResults) "results_map" else "browse_map"
                                         navController.navigate(dest) {
@@ -130,6 +127,17 @@ class MainActivity : ComponentActivity() {
                                     },
                                     icon = { Icon(Icons.Default.Route, null) },
                                     label = { Text("Route", fontSize = 10.sp) }
+                                )
+                                NavigationBarItem(
+                                    selected = currentRoute == "trip_log",
+                                    onClick = {
+                                        navController.navigate("trip_log") {
+                                            popUpTo("search")
+                                            launchSingleTop = true
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.ReceiptLong, null) },
+                                    label = { Text("Trip", fontSize = 10.sp) }
                                 )
                                 // Custom chargers and About live inside Settings — Material caps
                                 // bottom navigation at 5 destinations before labels/targets shrink.
@@ -202,6 +210,12 @@ class MainActivity : ComponentActivity() {
                                     chargerViewModel.selectCharger(charger.pk)
                                     navController.navigate("results_map") { launchSingleTop = true }
                                 },
+                                onShowMapView = {
+                                    navController.navigate("results_map") {
+                                        popUpTo("search")
+                                        launchSingleTop = true
+                                    }
+                                },
                                 onEditCustomCharger = { id ->
                                     navController.navigate("custom_charger_form?id=$id") { launchSingleTop = true }
                                 }
@@ -210,6 +224,12 @@ class MainActivity : ComponentActivity() {
                         composable("results_map") {
                             ResultsMapScreen(
                                 chargerViewModel = chargerViewModel,
+                                onShowListView = {
+                                    navController.navigate("results") {
+                                        popUpTo("search")
+                                        launchSingleTop = true
+                                    }
+                                },
                                 onClear = {
                                     navController.navigate("browse_map") {
                                         popUpTo("search")
@@ -217,6 +237,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             )
+                        }
+                        composable("trip_log") {
+                            TripLogScreen(tripLogViewModel)
                         }
                         composable("route") {
                             RoutePlannerScreen(
@@ -249,6 +272,7 @@ class MainActivity : ComponentActivity() {
                         composable("backup_restore") {
                             BackupRestoreScreen(
                                 chargerViewModel = chargerViewModel,
+                                tripLogViewModel = tripLogViewModel,
                                 onBack = { navController.popBackStack() }
                             )
                         }

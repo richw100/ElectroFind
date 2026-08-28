@@ -59,6 +59,7 @@ data class ChargeSession(val startSoc: Int, val targetSoc: Int, val stayMinutes:
 fun ResultsScreen(
     chargerViewModel: ChargerViewModel,
     onShowOnMap: (ChargingLocation) -> Unit = {},
+    onShowMapView: () -> Unit = {},
     onEditCustomCharger: ((Long) -> Unit)? = null
 ) {
     val state by chargerViewModel.state.collectAsState()
@@ -84,6 +85,9 @@ fun ResultsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onShowMapView) {
+                        Icon(Icons.Default.Map, "Map view")
+                    }
                     IconButton(onClick = { showFilters = !showFilters }) {
                         Icon(Icons.Default.FilterList, "Filter / Sort")
                     }
