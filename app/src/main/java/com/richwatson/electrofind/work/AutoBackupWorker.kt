@@ -10,10 +10,14 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.richwatson.electrofind.db.AppDatabase
 import com.richwatson.electrofind.model.BackupFile
 import com.richwatson.electrofind.model.CustomCharger
 import com.richwatson.electrofind.model.Trip
+import com.richwatson.electrofind.model.TripLogBackup
+import com.richwatson.electrofind.model.TripLogSettingsBackup
 import com.richwatson.electrofind.preferences.AppPreferences
+import com.richwatson.electrofind.repository.toBackup
 import com.richwatson.electrofind.util.AutoBackupWriter
 import java.util.concurrent.TimeUnit
 
@@ -30,12 +34,29 @@ class AutoBackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
             gson.fromJson(prefs.rawTrips, object : TypeToken<List<Trip>>() {}.type) ?: emptyList()
         } catch (e: Exception) { emptyList() }
 
+        val tripLog: TripLogBackup? = try {
+            val dao = AppDatabase.getInstance(applicationContext).tripLogDao()
+            TripLogBackup(
+                sessions = dao.allSessions().map { it.toBackup() },
+                customCharges = dao.allCustomCharges().map { it.toBackup() },
+                settings = TripLogSettingsBackup(
+                    eurToGbpRate = prefs.tripEurToGbpRate,
+                    iceMpg = prefs.tripIceMpg,
+                    petrolPricePerLitre = prefs.tripPetrolPricePerLitre,
+                    evMilesPerKwh = prefs.tripEvMilesPerKwh,
+                    milesTravelled = prefs.tripMilesTravelled,
+                    folderUri = prefs.tripFolderUri
+                )
+            )
+        } catch (e: Exception) { null }
+
         val json = gson.toJson(
             BackupFile(
                 customChargers = customChargers,
                 favouritePks = prefs.favouritePks.toList(),
                 excludedPks = prefs.excludedPks.toList(),
-                trips = trips
+                trips = trips,
+                tripLog = tripLog
             )
         )
 

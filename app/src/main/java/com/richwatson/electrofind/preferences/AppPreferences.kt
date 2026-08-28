@@ -104,4 +104,42 @@ class AppPreferences(context: Context) {
     var lastAutoBackupAt: Long
         get() = prefs.getLong("last_auto_backup_at", 0L)
         set(value) { prefs.edit().putLong("last_auto_backup_at", value).apply() }
+
+    // ── Trip tab (charge-session receipt summary) ───────────────────────────
+    // SAF tree URI for the folder holding Electroverse receipt PDFs (usually Downloads).
+    // commit(): losing this after a process kill means the user has to re-grant folder access.
+    var tripFolderUri: String?
+        get() = prefs.getString("trip_folder_uri", null)
+        set(value) { prefs.edit().putString("trip_folder_uri", value).commit() }
+
+    var tripEurToGbpRate: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("trip_eur_to_gbp_rate", java.lang.Double.doubleToLongBits(0.86)))
+        set(value) { prefs.edit().putLong("trip_eur_to_gbp_rate", java.lang.Double.doubleToLongBits(value)).apply() }
+
+    var tripIceMpg: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("trip_ice_mpg", java.lang.Double.doubleToLongBits(40.0)))
+        set(value) { prefs.edit().putLong("trip_ice_mpg", java.lang.Double.doubleToLongBits(value)).apply() }
+
+    var tripPetrolPricePerLitre: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("trip_petrol_price_per_litre", java.lang.Double.doubleToLongBits(1.45)))
+        set(value) { prefs.edit().putLong("trip_petrol_price_per_litre", java.lang.Double.doubleToLongBits(value)).apply() }
+
+    var tripEvMilesPerKwh: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("trip_ev_miles_per_kwh", java.lang.Double.doubleToLongBits(3.5)))
+        set(value) { prefs.edit().putLong("trip_ev_miles_per_kwh", java.lang.Double.doubleToLongBits(value)).apply() }
+
+    // Actual distance driven over the selected range. 0.0 = not entered → miles are estimated
+    // from energy × tripEvMilesPerKwh instead. When set, mi/kWh is derived from it.
+    var tripMilesTravelled: Double
+        get() = java.lang.Double.longBitsToDouble(prefs.getLong("trip_miles_travelled", java.lang.Double.doubleToLongBits(0.0)))
+        set(value) { prefs.edit().putLong("trip_miles_travelled", java.lang.Double.doubleToLongBits(value)).apply() }
+
+    // 0L = unset — the ViewModel then defaults the range to the last 30 days.
+    var tripRangeStartEpochMillis: Long
+        get() = prefs.getLong("trip_range_start", 0L)
+        set(value) { prefs.edit().putLong("trip_range_start", value).apply() }
+
+    var tripRangeEndEpochMillis: Long
+        get() = prefs.getLong("trip_range_end", 0L)
+        set(value) { prefs.edit().putLong("trip_range_end", value).apply() }
 }

@@ -35,6 +35,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Close
@@ -405,6 +406,7 @@ fun BrowseMapScreen(
 @Composable
 fun ResultsMapScreen(
     chargerViewModel: ChargerViewModel,
+    onShowListView: (() -> Unit)? = null,
     onClear: () -> Unit = {}
 ) {
     val state by chargerViewModel.state.collectAsState()
@@ -454,6 +456,11 @@ fun ResultsMapScreen(
                     }
                 },
                 actions = {
+                    if (onShowListView != null) {
+                        IconButton(onClick = onShowListView) {
+                            Icon(Icons.AutoMirrored.Filled.List, "List view")
+                        }
+                    }
                     IconButton(onClick = {
                         chargerViewModel.clearResults()
                         onClear()

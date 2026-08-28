@@ -7,6 +7,7 @@ import com.richwatson.electrofind.db.AppDatabase
 import com.richwatson.electrofind.preferences.AppPreferences
 import com.richwatson.electrofind.repository.CarProfileRepository
 import com.richwatson.electrofind.repository.ChargerRepository
+import com.richwatson.electrofind.repository.TripLogRepository
 import com.richwatson.electrofind.work.AutoBackupWorker
 import org.osmdroid.config.Configuration
 import java.io.File
@@ -16,6 +17,7 @@ class ElectroFindApp : Application() {
     lateinit var repository: ChargerRepository
     lateinit var appPreferences: AppPreferences
     lateinit var carProfileRepository: CarProfileRepository
+    lateinit var tripLogRepository: TripLogRepository
     val database: AppDatabase get() = AppDatabase.getInstance(this)
 
     override fun onCreate() {
@@ -26,6 +28,7 @@ class ElectroFindApp : Application() {
         repository = ChargerRepository(service, this, db.chargerDao(), tokenManager)
         appPreferences = AppPreferences(this)
         carProfileRepository = CarProfileRepository(this)
+        tripLogRepository = TripLogRepository(this, db.tripLogDao(), appPreferences)
         AutoBackupWorker.schedulePeriodic(this)
 
         Configuration.getInstance().apply {

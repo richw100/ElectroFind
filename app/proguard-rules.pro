@@ -22,6 +22,12 @@
 -keep public class * implements java.lang.reflect.Type
 -dontwarn sun.misc.**
 
+# pdfbox-android (com.tom-roush) — the receipt PDF parser. Keep its classes and silence
+# warnings about the optional JPEG2000 dependency it never actually loads on Android.
+-keep class com.tom_roush.pdfbox.** { *; }
+-dontwarn com.tom_roush.**
+-dontwarn com.gemalto.jp2.**
+
 # WorkManager instantiates Worker/CoroutineWorker subclasses reflectively via this
 # constructor — R8 can otherwise strip or rename it, silently breaking background work
 # (RefreshChargersWorker, AutoBackupWorker) with no crash, just work that never runs.
