@@ -46,6 +46,19 @@ class KonaChargeCurveAcCapTest {
     }
 
     @Test
+    fun acConnector_usesAcEfficiency_evenAt22kW() {
+        // Same 22 kW rating, no AC cap on the profile: the Type 2 (AC) run should still be
+        // slower than the CCS (DC) run because AC charging is modelled as less efficient.
+        val ac = KonaChargeCurve.simulate(20f, 60f, 22.0, connectorType = "Type 2", profile = noAcCap)
+        val dc = KonaChargeCurve.simulate(20f, 60f, 22.0, connectorType = "CCS", profile = noAcCap)
+        assertTrue(
+            "expected AC (${ac.chargeMinutes}) slower than DC (${dc.chargeMinutes})",
+            ac.chargeMinutes > dc.chargeMinutes
+        )
+        assertTrue(ac.billedEnergyKwh > dc.billedEnergyKwh)
+    }
+
+    @Test
     fun acCap_neverSpeedsChargingUp() {
         // Cap above the connector rating must not increase power.
         val slowAc = KonaChargeCurve.simulate(20f, 80f, 7.4, connectorType = "Type 2", profile = kona)

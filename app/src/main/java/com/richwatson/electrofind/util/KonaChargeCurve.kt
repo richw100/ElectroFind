@@ -192,15 +192,17 @@ object KonaChargeCurve {
         profile: CarProfile,
         connectorType: String?
     ): SimResult {
+        val isAc = isAcConnector(connectorType, chargerMaxKw)
         // On an AC connector the car draws no more than its on-board charger can accept,
         // regardless of what the connector is rated for (the DC curve doesn't apply).
         val acCap = profile.maxAcKw
-        val effectiveMaxKw = if (acCap != null && acCap > 0.0 && isAcConnector(connectorType, chargerMaxKw))
+        val effectiveMaxKw = if (isAc && acCap != null && acCap > 0.0)
             minOf(chargerMaxKw, acCap) else chargerMaxKw
         if (effectiveMaxKw <= 0.0 || startSoc >= targetSoc) {
             return SimResult(startSoc, 0.0, 0.0, 0.0, startSoc >= targetSoc)
         }
-        val efficiency = if (effectiveMaxKw >= 22.0) 0.95 else 0.88
+        // AC charging loses more to the on-board rectifier/thermal management than DC does.
+        val efficiency = if (isAc) 0.88 else 0.95
         val step = 0.1f
         val energyPerStep = profile.batteryKwh * (step / 100.0)
         var soc = startSoc
