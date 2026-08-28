@@ -58,6 +58,7 @@ fun ChargeCurveScreen(chargerViewModel: ChargerViewModel) {
     var pendingParseResult by remember { mutableStateOf<SvgCurveParser.ParseResult?>(null) }
     var newProfileName by remember { mutableStateOf("") }
     var newProfileBatteryKwh by remember { mutableStateOf("77.4") }
+    var newProfileMaxAcKw by remember { mutableStateOf("11") }
     var parseError by remember { mutableStateOf<String?>(null) }
 
     val svgLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -69,6 +70,7 @@ fun ChargeCurveScreen(chargerViewModel: ChargerViewModel) {
                     pendingParseResult = result
                     newProfileName = ""
                     newProfileBatteryKwh = "77.4"
+                    newProfileMaxAcKw = "11"
                     parseError = null
                     showUploadDialog = true
                 } else {
@@ -279,11 +281,12 @@ fun ChargeCurveScreen(chargerViewModel: ChargerViewModel) {
             val peakKw = activeProfile.rawPoints.maxOfOrNull { it.second } ?: 0f
             val avgKw2080 = (20..80).map { activeProfile.powerAtSoc(it.toFloat()) }.average().toFloat()
             val kwAt80 = activeProfile.powerAtSoc(80f)
-            listOf(
+            listOfNotNull(
                 "Battery" to "%.1f kWh usable".format(activeProfile.batteryKwh),
-                "Peak power" to "%.0f kW".format(peakKw),
+                "Peak power (DC)" to "%.0f kW".format(peakKw),
                 "Avg 20–80%" to "%.0f kW".format(avgKw2080),
                 "At 80% SoC" to "%.0f kW".format(kwAt80),
+                activeProfile.maxAcKw?.let { "Max AC rate" to "%.1f kW".format(it) },
             ).forEach { (label, value) ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(label, style = MaterialTheme.typography.bodySmall, color = colorScheme.primary)
@@ -327,7 +330,15 @@ fun ChargeCurveScreen(chargerViewModel: ChargerViewModel) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                }
+                    OutlinedTextField(
+                        value = newProfileMaxAcKw,
+                        onValueChange = { newProfileMaxAcKw = it },
+                        label = { Text("Max AC charge rate (kW)") },
+                        supportingText = { Text("On-board charger limit — used on Type 2 / AC connectors. Leave blank if unknown.") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+}
             },
             confirmButton = {
                 Button(
@@ -336,7 +347,8 @@ fun ChargeCurveScreen(chargerViewModel: ChargerViewModel) {
                             id = UUID.randomUUID().toString(),
                             name = newProfileName.trim().ifBlank { "Custom profile" },
                             batteryKwh = newProfileBatteryKwh.toDoubleOrNull() ?: 77.4,
-                            rawPoints = parse.points
+                            rawPoints = parse.points,
+                            maxAcKw = newProfileMaxAcKw.toDoubleOrNull()?.takeIf { it > 0 }
                         )
                         chargerViewModel.saveProfile(profile)
                         showUploadDialog = false

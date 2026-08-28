@@ -52,7 +52,8 @@ internal fun ChargingLocation.chargerDetailLines(stop: RouteStop, convertToGbp: 
                 stop.arrivalSocPercent.toFloat(),
                 stop.departureSocPercent.toFloat(),
                 s.kilowatts!!, null,
-                profile = profile
+                profile = profile,
+                connectorType = s.type
             ).chargeMinutes
             val avParts = listOfNotNull(
                 if (avail > 0) "${avail}a" else null,
@@ -111,7 +112,8 @@ internal fun buildConnectorCostText(charger: ChargingLocation, stop: RouteStop, 
         summary.chargingTimeRateMajor ?: 0.0,
         summary.parkingTimeRateMajor ?: 0.0,
         convertToGbp, profile,
-        summary.chargingTimeRateTiers
+        summary.chargingTimeRateTiers,
+        summary.type
     )
 }
 
@@ -119,7 +121,8 @@ private fun buildCostTextFor(
     charger: ChargingLocation, stop: RouteStop, kw: Double, price: Double,
     connectionFee: Double, chargingRate: Double, parkingRate: Double,
     convertToGbp: Boolean, profile: CarProfile,
-    chargingRateTiers: List<com.richwatson.electrofind.api.models.RateTier> = emptyList()
+    chargingRateTiers: List<com.richwatson.electrofind.api.models.RateTier> = emptyList(),
+    connectorType: String? = null
 ): String {
     val gracePeriod = charger.gracePeriodMinutes
 
@@ -128,7 +131,8 @@ private fun buildCostTextFor(
         stop.departureSocPercent.toFloat(),
         kw,
         stayMinutes = null,
-        profile = profile
+        profile = profile,
+        connectorType = connectorType
     )
     val optCost = KonaChargeCurve.totalCost(optResult, price, connectionFee, chargingRate, parkingRate, gracePeriodMinutes = gracePeriod, chargingRateTiers = chargingRateTiers, sessionStartMinuteOfDay = stop.arrivalTimeMinutes)
 
@@ -137,7 +141,8 @@ private fun buildCostTextFor(
         stop.departureSocPercent.toFloat(),
         kw,
         stayMinutes = stop.stayMinutes.toDouble(),
-        profile = profile
+        profile = profile,
+        connectorType = connectorType
     )
     val stayCost = KonaChargeCurve.totalCost(stayResult, price, connectionFee, chargingRate, parkingRate, stop.stayMinutes.toDouble(), gracePeriod, chargingRateTiers, stop.arrivalTimeMinutes)
     val nativeCur = charger.currencySymbol ?: "€"

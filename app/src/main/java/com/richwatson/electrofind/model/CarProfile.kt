@@ -4,7 +4,11 @@ data class CarProfile(
     val id: String,
     val name: String,
     val batteryKwh: Double,
-    val rawPoints: List<Pair<Float, Float>>  // (SoC% 0-100, kW)
+    val rawPoints: List<Pair<Float, Float>>,  // (SoC% 0-100, kW)
+    // Max power the on-board AC charger can accept, in kW. The rawPoints curve describes DC
+    // fast-charging only; on an AC connector (Type 2 etc.) the car is limited by its OBC, so
+    // the simulation caps the charge rate at this value. null = unknown (no AC cap applied).
+    val maxAcKw: Double? = null
 ) {
     // Pre-compute a 101-element lookup array (one per integer SoC) for fast simulation
     val socKwArray: FloatArray by lazy {
@@ -37,6 +41,7 @@ data class CarProfile(
             id = KONA_LR_ID,
             name = "Hyundai Kona EV Long Range",
             batteryKwh = 65.4,
+            maxAcKw = 11.0,  // 10.5 kW OBC, three-phase; single-phase installs will be slower
             rawPoints = listOf(
                 0f to 50.0f, 1f to 54.9f, 2f to 60.0f, 3f to 65.0f, 4f to 69.9f,
                 5f to 75.0f, 6f to 80.0f, 7f to 82.7f, 8f to 85.5f, 9f to 88.2f,

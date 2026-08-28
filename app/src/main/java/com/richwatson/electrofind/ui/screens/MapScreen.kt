@@ -655,11 +655,11 @@ fun ChargerMapView(
                     if (session == null) return@map null
                     when (priceMode) {
                         MapPriceMode.OPTIMAL_COST -> {
-                            val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
+                            val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile, connectorType = fastest.type)
                             KonaChargeCurve.totalCost(result, price, fastest.connectionFeeMajor ?: 0.0, fastest.chargingTimeRateMajor ?: 0.0, fastest.parkingTimeRateMajor ?: 0.0, result.chargeMinutes, charger.gracePeriodMinutes, fastest.chargingTimeRateTiers, sessionStartMinuteOfDay)
                         }
                         MapPriceMode.STAY_COST -> {
-                            val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
+                            val result = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile, connectorType = fastest.type)
                             KonaChargeCurve.totalCost(result, price, fastest.connectionFeeMajor ?: 0.0, fastest.chargingTimeRateMajor ?: 0.0, fastest.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes, fastest.chargingTimeRateTiers, sessionStartMinuteOfDay)
                         }
                         else -> null
@@ -757,7 +757,8 @@ fun ChargerMapView(
                                 session.startSoc.toFloat(), session.targetSoc.toFloat(),
                                 s.kilowatts,
                                 if (priceMode == MapPriceMode.STAY_COST) session.stayMinutes.toDouble() else null,
-                                profile = session.profile
+                                profile = session.profile,
+                                connectorType = s.type
                             )
                             val stayMins = if (priceMode == MapPriceMode.STAY_COST) session.stayMinutes.toDouble() else sim.chargeMinutes
                             val cost = KonaChargeCurve.totalCost(sim, s.pricePerKwh,
@@ -1038,9 +1039,9 @@ fun ChargerMapView(
                             }
                             if (session != null && pg != null) {
                                 val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
-                                val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
+                                val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile, connectorType = pg.type)
                                 val optCost = KonaChargeCurve.totalCost(optResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes, pg.chargingTimeRateTiers, sessionStartMinuteOfDay)
-                                val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
+                                val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile, connectorType = pg.type)
                                 val stayCost = KonaChargeCurve.totalCost(stayResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes, pg.chargingTimeRateTiers, sessionStartMinuteOfDay)
                                 val optMins = optResult.chargeMinutes.toInt()
                                 val optSoc = optResult.endSocPercent.toInt()

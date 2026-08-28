@@ -120,6 +120,26 @@ object KonaChargeCurve {
         return lo + (hi - lo) * frac
     }
 
+    // Three-phase AC tops out at 22 kW; 43 kW AC is effectively extinct and those units are
+    // DC-capable anyway, so anything above this ceiling is treated as DC.
+    private const val AC_KW_CEILING = 25.0
+
+    // Whether a connector delivers AC (so the car's on-board charger limit applies) rather than
+    // DC. Decided from the connector's human-readable type where possible, falling back to the
+    // power rating when the type is unknown.
+    fun isAcConnector(connectorType: String?, chargerKw: Double): Boolean {
+        val t = connectorType?.uppercase()?.replace("_", " ")?.replace("-", " ")
+            ?: return chargerKw in 0.0..AC_KW_CEILING
+        return when {
+            "CCS" in t || "COMBO" in t || "CHADEMO" in t || "CHA DE MO" in t -> false
+            "TESLA" in t || "NACS" in t || "SUPERCHARGER" in t -> false
+            "TYPE 2" in t || "TYPE 1" in t || "TYPE 3" in t ||
+                "DOMESTIC" in t || "HOUSEHOLD" in t || "SCHUKO" in t ||
+                "COMMANDO" in t || "3 PIN" in t || "BS1363" in t || "CEE" in t -> true
+            else -> chargerKw in 0.0..AC_KW_CEILING
+        }
+    }
+
     data class SimResult(
         val endSocPercent: Float,
         val energyKwh: Double,
@@ -133,7 +153,8 @@ object KonaChargeCurve {
         val targetSoc: Float,
         val chargerMaxKw: Double,
         val stayMinutes: Double?,
-        val profileId: String
+        val profileId: String,
+        val connectorType: String?
     )
 
     // simulate() is a pure function of its inputs but runs a ~600-iteration loop; it's
@@ -151,13 +172,14 @@ object KonaChargeCurve {
         targetSoc: Float,
         chargerMaxKw: Double,
         stayMinutes: Double? = null,
-        profile: CarProfile = CarProfile.KONA_LR
+        profile: CarProfile = CarProfile.KONA_LR,
+        connectorType: String? = null
     ): SimResult {
         // Key on profile.id, not the CarProfile object itself — its equals() would walk
         // a 101-entry point list on every cache lookup, defeating the point of caching.
-        val key = SimKey(startSoc, targetSoc, chargerMaxKw, stayMinutes, profile.id)
+        val key = SimKey(startSoc, targetSoc, chargerMaxKw, stayMinutes, profile.id, connectorType)
         synchronized(simCache) { simCache[key] }?.let { return it }
-        val result = computeSimulate(startSoc, targetSoc, chargerMaxKw, stayMinutes, profile)
+        val result = computeSimulate(startSoc, targetSoc, chargerMaxKw, stayMinutes, profile, connectorType)
         synchronized(simCache) { simCache[key] = result }
         return result
     }
@@ -167,12 +189,18 @@ object KonaChargeCurve {
         targetSoc: Float,
         chargerMaxKw: Double,
         stayMinutes: Double?,
-        profile: CarProfile
+        profile: CarProfile,
+        connectorType: String?
     ): SimResult {
-        if (chargerMaxKw <= 0.0 || startSoc >= targetSoc) {
+        // On an AC connector the car draws no more than its on-board charger can accept,
+        // regardless of what the connector is rated for (the DC curve doesn't apply).
+        val acCap = profile.maxAcKw
+        val effectiveMaxKw = if (acCap != null && acCap > 0.0 && isAcConnector(connectorType, chargerMaxKw))
+            minOf(chargerMaxKw, acCap) else chargerMaxKw
+        if (effectiveMaxKw <= 0.0 || startSoc >= targetSoc) {
             return SimResult(startSoc, 0.0, 0.0, 0.0, startSoc >= targetSoc)
         }
-        val efficiency = if (chargerMaxKw >= 22.0) 0.95 else 0.88
+        val efficiency = if (effectiveMaxKw >= 22.0) 0.95 else 0.88
         val step = 0.1f
         val energyPerStep = profile.batteryKwh * (step / 100.0)
         var soc = startSoc
@@ -180,7 +208,7 @@ object KonaChargeCurve {
         var totalMinutes = 0.0
 
         while (soc < targetSoc) {
-            val effectiveKw = minOf(chargerMaxKw, profile.powerAtSoc(soc).toDouble())
+            val effectiveKw = minOf(effectiveMaxKw, profile.powerAtSoc(soc).toDouble())
             if (effectiveKw <= 0.0) break
             val timeStep = (energyPerStep / (effectiveKw * efficiency)) * 60.0
             if (stayMinutes != null && totalMinutes + timeStep > stayMinutes) {

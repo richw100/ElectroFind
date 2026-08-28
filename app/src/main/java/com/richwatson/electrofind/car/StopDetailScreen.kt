@@ -296,7 +296,7 @@ class StopDetailScreen(
                     val mins = s.kilowatts?.let {
                         KonaChargeCurve.simulate(
                             stop.arrivalSocPercent.toFloat(), stop.departureSocPercent.toFloat(),
-                            it, null, profile = profile
+                            it, null, profile = profile, connectorType = s.type
                         ).chargeMinutes
                     }
                     val costText = buildConnectorCostText(charger, stop, s, prefs.convertToGbp, profile)

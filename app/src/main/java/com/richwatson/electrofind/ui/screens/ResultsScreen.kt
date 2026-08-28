@@ -714,9 +714,9 @@ private fun ChargerCard(
                     priceGroups.forEach { s ->
                         val kw = s.kilowatts!!
                         val price = if (s.isFree) 0.0 else s.pricePerKwh!!
-                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile)
+                        val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, profile = session.profile, connectorType = s.type)
                         val optCost = KonaChargeCurve.totalCost(optResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, chargingRateTiers = s.chargingTimeRateTiers, sessionStartMinuteOfDay = sessionStartMinuteOfDay)
-                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile)
+                        val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), profile = session.profile, connectorType = s.type)
                         val stayCost = KonaChargeCurve.totalCost(stayResult, price, s.connectionFeeMajor ?: 0.0, s.chargingTimeRateMajor ?: 0.0, s.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), chargingRateTiers = s.chargingTimeRateTiers, sessionStartMinuteOfDay = sessionStartMinuteOfDay)
                         val optMins = optResult.chargeMinutes.toInt()
                         val optSoc = optResult.endSocPercent.toInt()

@@ -797,9 +797,9 @@ private fun RouteStopCard(
                         }
                         if (pg != null) {
                             val price = if (pg.isFree) 0.0 else pg.pricePerKwh!!
-                            val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null)
+                            val optResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, null, connectorType = pg.type)
                             val optCost = KonaChargeCurve.totalCost(optResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, optResult.chargeMinutes, charger.gracePeriodMinutes, pg.chargingTimeRateTiers, stop.arrivalTimeMinutes)
-                            val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble())
+                            val stayResult = KonaChargeCurve.simulate(session.startSoc.toFloat(), session.targetSoc.toFloat(), kw, session.stayMinutes.toDouble(), connectorType = pg.type)
                             val stayCost = KonaChargeCurve.totalCost(stayResult, price, pg.connectionFeeMajor ?: 0.0, pg.chargingTimeRateMajor ?: 0.0, pg.parkingTimeRateMajor ?: 0.0, session.stayMinutes.toDouble(), charger.gracePeriodMinutes, pg.chargingTimeRateTiers, stop.arrivalTimeMinutes)
                             val optMins = optResult.chargeMinutes.toInt()
                             val optSoc = optResult.endSocPercent.toInt()

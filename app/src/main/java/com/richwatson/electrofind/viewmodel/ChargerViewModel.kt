@@ -1038,7 +1038,8 @@ private fun ChargingLocation.simCost(state: SearchState, stayMinutes: Double?): 
             state.targetSocPercent.toFloat(),
             kw,
             stayMinutes,
-            profile = state.activeProfile
+            profile = state.activeProfile,
+            connectorType = tier.type
         )
         KonaChargeCurve.totalCost(
             result = result,

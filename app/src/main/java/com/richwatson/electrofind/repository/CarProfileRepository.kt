@@ -22,6 +22,7 @@ class CarProfileRepository(context: Context) {
             put("id", profile.id)
             put("name", profile.name)
             put("batteryKwh", profile.batteryKwh)
+            profile.maxAcKw?.let { put("maxAcKw", it) }
             put("points", JSONArray().apply {
                 profile.rawPoints.forEach { (soc, kw) ->
                     put(JSONArray().put(soc.toDouble()).put(kw.toDouble()))
@@ -46,7 +47,8 @@ class CarProfileRepository(context: Context) {
             id = json.getString("id"),
             name = json.getString("name"),
             batteryKwh = json.getDouble("batteryKwh"),
-            rawPoints = points
+            rawPoints = points,
+            maxAcKw = if (json.has("maxAcKw")) json.getDouble("maxAcKw") else null
         )
     } catch (_: Exception) { null }
 }
